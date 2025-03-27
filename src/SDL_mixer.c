@@ -19,9 +19,11 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+// !!! FIXME: figure out `int` vs Sint64/Uint64 metrics in all of this.
+
 #include "SDL_mixer_internal.h"
 
-static const Mix_Decoder decoders[] = {
+static const Mix_Decoder *decoders[] = {
     &Mix_Decoder_WAV
 };
 
@@ -130,22 +132,20 @@ static void ApplyFade(Mix_Track *track, float *pcm, int frames)
 
     if (track->fade_direction == 0) {
         return;  // no fade is happening, early exit.
-    } else if (track->position < track->fade_start_frame) {
-        return;  // fade isn't happening yet.
     }
 
     const int channels = track->input_spec.channels;
-    int fade_frame_position = (int) (track->position - track->fade_start_frame);
-    const int fade_frames = track->fade_frames;
-    SDL_assert(fade_frames != 0);
-    const int to_be_faded = SDL_clamp(fade_frames - fade_frame_position, 0, frames);
+    const int to_be_faded = (int) SDL_min(track->fade_frames, frames);
+    const int total_fade_frames = (int) track->total_fade_frames;
+    int fade_frame_position = total_fade_frames - track->fade_frames;
 
     // some hacks to avoid a branch on each sample frame. Might not be a good idea in practice.
     const float pctmult = (track->fade_direction < 0) ? 1.0f : -1.0f;
     const float pctsub = (track->fade_direction < 0) ? 1.0f : 0.0f;
+    const float ftotal_fade_frames = (float) total_fade_frames;
 
     for (int i = 0; i < to_be_faded; i++) {
-        const float pct = (pctsub - (((float) fade_frame_position) / ((float) fade_frames))) * pctmult;
+        const float pct = (pctsub - (((float) fade_frame_position) / ftotal_fade_frames)) * pctmult;
         SDL_assert(pct >= 0.0f);
         SDL_assert(pct <= 1.0f);
         fade_frame_position++;
@@ -168,6 +168,12 @@ static void ApplyFade(Mix_Track *track, float *pcm, int frames)
                 break;
         }
     }
+
+    track->fade_frames -= to_be_faded;
+    SDL_assert(track->fade_frames >= 0);
+    if (track->fade_frames == 0) {
+        track->fade_direction = 0;  // fade is done.
+    }
 }
 
 static void ConvertToFloat(Mix_Track *track, void *buffer, int br)
@@ -175,7 +181,7 @@ static void ConvertToFloat(Mix_Track *track, void *buffer, int br)
     // !!! FIXME: this is a _super_ expensive way to do this. Replace this code!
     Uint8 *converted = NULL;
     int converted_len = 0;
-    SDL_ConvertAudioSamples(&track->input_spec, buffer, br, &track->output_spec, converted, &converted_len);
+    SDL_ConvertAudioSamples(&track->input_spec, buffer, br, &track->output_spec, &converted, &converted_len);
     SDL_memcpy(buffer, converted, converted_len);
     SDL_free(converted);
 }
@@ -188,13 +194,14 @@ static int DecodeMore(Mix_Track *track, void *buffer, int buflen)
     int decode_bytes = buflen;
 
     if (srcfmt != SDL_AUDIO_F32) {
-        SDL_assert((srcfmtsize == 1) || (srcfmtsize == 2) || srcfmtsize == 4));  // so this division works out.
+        SDL_assert((srcfmtsize == 1) || (srcfmtsize == 2) || (srcfmtsize == 4));  // so this division works out.
         decode_bytes = (decode_bytes / sizeof (float)) * srcfmtsize;
     }
 
-    const int br = track->input_audio->decode(track, buffer, decode_bytes);
+    int br = track->input_audio->decoder->decode(track->decoder_userdata, buffer, decode_bytes);
     if ((br > 0) && (srcfmt != SDL_AUDIO_F32)) {
-        ConvertToFloat(track, buffer, br)
+        ConvertToFloat(track, buffer, br);
+        br = (br / srcfmtsize) * sizeof (float);
     }
 
     return br;
@@ -279,7 +286,7 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
                 maxpos = track->max_frames;
             }
             if (track->fade_direction < 0) {
-                const Sint64 maxfadepos = (Sint64) (track->fade_start_frame + track->fade_frames);
+                const Sint64 maxfadepos = (Sint64) (track->position + track->fade_frames);
                 if ((maxpos < 0) || (maxfadepos < maxpos)) {
                     maxpos = maxfadepos;
                 }
@@ -288,7 +295,7 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
             int frames_read = br / (sizeof (float) * channels);
             if (maxpos >= 0) {
                 const Uint64 newpos = track->position + frames_read;
-                if (newpos >= maxpos) {  // we read past the end of the fade, we need to clamp.
+                if (newpos >= maxpos) {  // we read past the end of the fade out or maxframes, we need to clamp.
                     br -= ((newpos - maxpos) * channels) * sizeof (float);
                     frames_read = br / (sizeof (float) * channels);
                     end_of_audio = true;
@@ -296,11 +303,6 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
             }
 
             ApplyFade(track, pcm, frames_read);
-
-            if (end_of_audio && (track->silence_frames < 0)) {
-                track->silence_frames = -track->silence_frames;
-                end_of_audio = false;
-            }
 
             // give the app a shot at the final buffer before sending it on for mixing
             const int samples = frames_read * channels;
@@ -321,7 +323,11 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
         if (end_of_audio) {
             bool track_finished = false;
             if (track->loops_remaining == 0) {
-                track_finished = true;  // out of data and no loops remain, we're done.
+                if (track->silence_frames < 0) {
+                    track->silence_frames = -track->silence_frames;  // time to start appending silence.
+                } else {
+                    track_finished = true;  // out of data, no loops remain, no appended silence left, we're done.
+                }
             } else {
                 if (track->loops_remaining > 0) {  // negative means infinite loops, so don't decrement for that.
                     track->loops_remaining--;
@@ -329,7 +335,7 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
                 if (track->input_stream) {  // can't loop on a streaming input, you're done.
                     track_finished = true;
                 } else {
-                    if (!track->input_audio->decoder->seek(track, track->loop_start)) {
+                    if (!track->input_audio->decoder->seek(track->decoder_userdata, track->loop_start)) {
                         track_finished = true;  // uhoh, can't seek! Abandon ship!
                     } else {
                         track->position = track->loop_start;
@@ -347,7 +353,7 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
 static void InitDecoders(void)
 {
     for (int i = 0; i < SDL_arraysize(decoders); i++) {
-        const Mix_Decoder *decoder = &decoders[i];
+        const Mix_Decoder *decoder = decoders[i];
         if (decoder->init()) {
             available_decoders[num_available_decoders++] = decoder;
         }
@@ -434,7 +440,7 @@ const char *Mix_GetAudioDecoder(int index)
         SDL_InvalidParamError("index");
         return NULL;
     }
-    return available_decoders[index].name;
+    return available_decoders[index]->name;
 }
 
 bool Mix_GetDeviceSpec(SDL_AudioSpec *spec)
@@ -447,12 +453,15 @@ bool Mix_GetDeviceSpec(SDL_AudioSpec *spec)
     return SDL_GetAudioDeviceFormat(audio_device, spec, NULL);
 }
 
-static const Mix_Decoder *ChooseDecoder(const void *buffer, size_t buflen, SDL_AudioSpec *spec, SDL_PropertiesID props)
+static const Mix_Decoder *ChooseDecoder(const void *buffer, size_t buflen, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata)
 {
+    const char *decoder_name = SDL_GetStringProperty(props, MIX_PROP_AUDIO_DECODER_STRING, NULL);
     for (int i = 0; i < num_available_decoders; i++) {
         const Mix_Decoder *decoder = available_decoders[i];
-        if (decoder->prepare_audio(buffer, buflen, spec, props)) {
-            return decoder;
+        if (!decoder_name || (SDL_strcasecmp(decoder->name, decoder_name) == 0)) {
+            if (decoder->init_audio(buffer, buflen, spec, props, audio_userdata)) {
+                return decoder;
+            }
         }
     }
 
@@ -460,10 +469,10 @@ static const Mix_Decoder *ChooseDecoder(const void *buffer, size_t buflen, SDL_A
     return NULL;
 }
 
-static void *DecodeWholeFile(Mix_Decoder *decoder, void *buffer, size_t buflen, SDL_AudioSpec *spec, SDL_PropertiesID props, size_t *decoded_len)
+static void *DecodeWholeFile(const Mix_Decoder *decoder, void *audio_userdata, void *buffer, size_t buflen, const SDL_AudioSpec *spec, SDL_PropertiesID props, size_t *decoded_len)
 {
     void *userdata = NULL;
-    if (!decoder->init_track(buffer, buflen, spec, props, &userdata)) {
+    if (!decoder->init_track(audio_userdata, buffer, buflen, spec, props, &userdata)) {
         return NULL;
     }
 
@@ -522,6 +531,8 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
     SDL_IOStream *io = (SDL_IOStream *) SDL_GetPointerProperty(props, MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER, NULL);
     const bool closeio = SDL_GetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_CLOSEIO_BOOLEAN, false);
     const bool predecode = SDL_GetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_PREDECODE_BOOLEAN, false);
+    void *audio_userdata = NULL;
+    const Mix_Decoder *decoder = NULL;
 
     // pull the whole thing into RAM, decoding or not.
     size_t buflen = 0;
@@ -540,31 +551,37 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
         goto failed;
     }
 
-    if (props && !SDL_CopyProperties(props, audio_props)) {
+    if (props && !SDL_CopyProperties(props, audio->props)) {
         goto failed;
     }
 
-    const Mix_Decoder *decoder = ChooseDecoder(buffer, buflen, &audio->spec, audio->props);
+    decoder = ChooseDecoder(buffer, buflen, &audio->spec, audio->props, &audio_userdata);
     if (!decoder) {
-        SDL_free(buffer);
-        return NULL;
+        goto failed;
     }
+
+    // set this before predecoding might change `decoder` to the RAW implementation.
+    SDL_SetStringProperty(audio->props, MIX_PROP_AUDIO_DECODER_STRING, decoder->name);
 
     if (predecode) {
         size_t decoded_len = 0;
-        void *decoded = DecodeWholeFile(decoder, buffer, buflen, &audio->spec, audio->props, &decoded_len);
-        SDL_free(buffer);
+        void *decoded = DecodeWholeFile(decoder, audio_userdata, buffer, buflen, &audio->spec, audio->props, &decoded_len);
         if (!decoded) {
-            return NULL;
+            goto failed;
         }
+        SDL_free(buffer);
+        decoder->quit_audio(audio_userdata);
         buffer = decoded;
         buflen = decoded_len;
         decoder = &Mix_Decoder_RAW;
+        audio_userdata = NULL;   // this counts on the RAW decoder not using audio_userdata; otherwise we'll have to tapdance more to init_audio again, set properties, etc.
     }
 
     audio->buffer = buffer;
     audio->buflen = buflen;
     audio->decoder = decoder;
+    audio->decoder_userdata = audio_userdata;
+
     SDL_AtomicIncRef(&audio->refcount);
 
     LockMixerState();
@@ -649,6 +666,9 @@ static void UnrefAudio(Mix_Audio *audio)
         }
         UnlockMixerState();
 
+        if (audio->decoder) {
+            audio->decoder->quit_audio(audio->decoder_userdata);
+        }
         if (audio->props) {
             SDL_DestroyProperties(audio->props);
         }
@@ -705,6 +725,7 @@ Mix_Track *Mix_CreateTrack(void)
 
     if (!SDL_BindAudioStream(audio_device, track->output_stream)) {
         char *err = SDL_strdup(SDL_GetError());   // save this off in case destruction changes it.
+SDL_Log("OH SHIT '%s'", err);
         Mix_DestroyTrack(track);  // just destroy it normally, it was otherwise initialized.
         if (!err) {
             SDL_OutOfMemory();
@@ -750,7 +771,7 @@ void Mix_DestroyTrack(Mix_Track *track)
     SDL_DestroyAudioStream(track->output_stream);
 
     if (track->input_audio) {
-        track->input_audio->decoder->quit_track(track);
+        track->input_audio->decoder->quit_track(track->decoder_userdata);
     }
 
     UnrefAudio(track->input_audio);
@@ -771,7 +792,7 @@ static void UnlockTrack(Mix_Track *track)
 {
     SDL_assert(track != NULL);
     SDL_assert(track->output_stream != NULL);
-    SDL_LockAudioStream(track->output_stream);
+    SDL_UnlockAudioStream(track->output_stream);
 }
 
 bool Mix_SetTrackAudio(Mix_Track *track, Mix_Audio *audio)
@@ -783,7 +804,7 @@ bool Mix_SetTrackAudio(Mix_Track *track, Mix_Audio *audio)
     LockTrack(track);
 
     if (track->input_audio) {
-        track->input_audio->decoder->quit_track(track);
+        track->input_audio->decoder->quit_track(track->decoder_userdata);
         UnrefAudio(track->input_audio);
     }
 
@@ -793,7 +814,7 @@ bool Mix_SetTrackAudio(Mix_Track *track, Mix_Audio *audio)
 
     bool retval = true;
     if (audio) {
-        retval = audio->decoder->init_track(track);
+        retval = audio->decoder->init_track(audio->decoder_userdata, audio->buffer, audio->buflen, &audio->spec, audio->props, &track->decoder_userdata);
         if (!retval) {
             track->input_audio = NULL;
         } else {
@@ -819,7 +840,7 @@ bool Mix_SetTrackAudioStream(Mix_Track *track, SDL_AudioStream *stream)
     LockTrack(track);
 
     if (track->input_audio) {
-        track->input_audio->decoder->quit_track(track);
+        track->input_audio->decoder->quit_track(track->decoder_userdata);
         UnrefAudio(track->input_audio);
         track->input_audio = NULL;
     }
@@ -970,7 +991,7 @@ bool Mix_SetTrackPlaybackPosition(Mix_Track *track, Uint64 frames)
     } else if (!track->input_audio) {
         retval = SDL_SetError("No audio currently assigned to this track");
     } else {
-        retval = track->input_audio->decoder->seek(track, frames);
+        retval = track->input_audio->decoder->seek(track->decoder_userdata, frames);
         if (retval) {
             track->position = frames;
         }
@@ -1052,13 +1073,14 @@ bool Mix_PlayTrack(Mix_Track *track, Sint64 maxFrames, int loops, Sint64 startpo
         retval = SDL_SetError("No audio currently assigned to this track");
     } else if (track->input_stream && (startpos != 0)) {
         retval = SDL_SetError("Playing an input stream (not Mix_Audio) with a non-zero startpos");  // !!! FIXME: should we just read off this many frames right now instead?
-    } else if (track->input_audio && (!track->input_audio->decoder->seek(track, startpos))) {
+    } else if (track->input_audio && (!track->input_audio->decoder->seek(track->decoder_userdata, startpos))) {
         retval = false;
     } else {
         track->max_frames = maxFrames;
         track->loops_remaining = loops;
-        track->fade_frames = (fadeIn > 0) ? fadeIn : 0;
-        track->fade_start_frame = startpos;
+        track->loop_start = loop_start;
+        track->total_fade_frames = (fadeIn > 0) ? fadeIn : 0;
+        track->fade_frames = track->total_fade_frames;
         track->fade_direction = (fadeIn > 0) ? 1 : 0;
         track->silence_frames = (append_silence_frames > 0) ? -append_silence_frames : 0;  // negative means "there is still actual audio data to play", positive means "we're done with actual data, feed silence now." Zero means no silence (left) to feed.
         track->state = MIX_STATE_PLAYING;
@@ -1131,12 +1153,15 @@ bool Mix_PlayOnce(Mix_Audio *audio)
 static void HaltTrack(Mix_Track *track, Sint64 fadeOut)
 {
     LockTrack(track);
-    if (fadeOut <= 0) {  // stop immediately.
-        TrackFinished(track);
-    } else {
-        track->fade_frames = fadeOut;
-        track->fade_start_frame = track->position;
-        track->fade_direction = -1;
+    if (track->state != MIX_STATE_STOPPED) {
+        if (fadeOut <= 0) {  // stop immediately.
+            TrackFinished(track);
+        } else {
+            track->total_fade_frames = fadeOut;
+            track->fade_frames = track->total_fade_frames;
+            track->fade_frames = fadeOut;
+            track->fade_direction = -1;
+        }
     }
     UnlockTrack(track);
 }

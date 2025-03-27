@@ -59,9 +59,10 @@ extern SDL_DECLSPEC Mix_Audio * SDLCALL Mix_LoadAudio_IO(SDL_IOStream *io, bool 
 extern SDL_DECLSPEC Mix_Audio * SDLCALL Mix_LoadAudio(const char *path, bool predecode);
 extern SDL_DECLSPEC Mix_Audio * SDLCALL Mix_LoadAudioWithProperties(SDL_PropertiesID props);  // lets you specify things like "here's a path to MIDI instrument files outside of this file", etc.
 
-#define MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER "SDL_mixer.audio_load.iostream"
-#define MIX_PROP_AUDIO_LOAD_CLOSEIO_BOOLEAN "SDL_mixer.audio_load.closeio"
-#define MIX_PROP_AUDIO_LOAD_PREDECODE_BOOLEAN "SDL_mixer.audio_load.predecode"
+#define MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER "SDL_mixer.audio.load.iostream"
+#define MIX_PROP_AUDIO_LOAD_CLOSEIO_BOOLEAN "SDL_mixer.audio.load.closeio"
+#define MIX_PROP_AUDIO_LOAD_PREDECODE_BOOLEAN "SDL_mixer.audio.load.predecode"
+#define MIX_PROP_AUDIO_DECODER_STRING "SDL_mixer.audio.decoder"
 
 
 extern SDL_DECLSPEC SDL_PropertiesID SDLCALL Mix_GetAudioProperties(Mix_Audio *audio);  // we can store audio format-specific metadata in here (artist/album/etc info...)
