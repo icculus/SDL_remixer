@@ -94,5 +94,6 @@ struct Mix_Track
 
 // these might not all be available, but they are all declared here as if they are.
 extern Mix_Decoder Mix_Decoder_WAV;
+extern Mix_Decoder Mix_Decoder_AIFF;
 extern Mix_Decoder Mix_Decoder_RAW;
 

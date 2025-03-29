@@ -24,7 +24,9 @@
 #include "SDL_mixer_internal.h"
 
 static const Mix_Decoder *decoders[] = {
-    &Mix_Decoder_WAV
+    &Mix_Decoder_WAV,
+    &Mix_Decoder_AIFF,
+    &Mix_Decoder_RAW
 };
 
 static const Mix_Decoder *available_decoders[SDL_arraysize(decoders)];
