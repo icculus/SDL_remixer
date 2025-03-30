@@ -132,8 +132,8 @@ extern SDL_DECLSPEC bool SDLCALL Mix_Paused(Mix_Track *track);  // true if sourc
 extern SDL_DECLSPEC bool SDLCALL Mix_SetMasterGain(float gain);  // one knob that adjusts all playing sounds. Modulates with per-Mix_Track gain.
 extern SDL_DECLSPEC float SDLCALL Mix_GetMasterGain(void);
 
-extern SDL_DECLSPEC bool SDLCALL Mix_SetGain(Mix_Track *track, float gain);  // Change gain for this one Mix_Track.
-extern SDL_DECLSPEC float SDLCALL Mix_GetGain(Mix_Track *track);
+extern SDL_DECLSPEC bool SDLCALL Mix_SetTrackGain(Mix_Track *track, float gain);  // Change gain for this one Mix_Track.
+extern SDL_DECLSPEC float SDLCALL Mix_GetTrackGain(Mix_Track *track);
 extern SDL_DECLSPEC bool SDLCALL Mix_SetTagGain(const char *tag, float gain);  // Change gain for all Mix_Tracks with this tag.
 
 

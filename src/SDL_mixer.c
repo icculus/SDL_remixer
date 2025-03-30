@@ -1409,7 +1409,7 @@ static bool SetTrackGain(Mix_Track *track, float gain)
     return retval;
 }
 
-bool Mix_SetGain(Mix_Track *track, float gain)
+bool Mix_SetTrackGain(Mix_Track *track, float gain)
 {
     if (!CheckTrackParam(track)) {
         return false;
@@ -1422,7 +1422,7 @@ bool Mix_SetGain(Mix_Track *track, float gain)
     return SetTrackGain(track, gain);
 }
 
-float Mix_GetGain(Mix_Track *track)
+float Mix_GetTrackGain(Mix_Track *track)
 {
     if (!CheckTrackParam(track)) {
         return 1.0f;
