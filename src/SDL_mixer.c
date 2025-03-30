@@ -839,7 +839,6 @@ Mix_Track *Mix_CreateTrack(void)
 
     if (!SDL_BindAudioStream(audio_device, track->output_stream)) {
         char *err = SDL_strdup(SDL_GetError());   // save this off in case destruction changes it.
-SDL_Log("OH SHIT '%s'", err);
         Mix_DestroyTrack(track);  // just destroy it normally, it was otherwise initialized.
         if (!err) {
             SDL_OutOfMemory();
