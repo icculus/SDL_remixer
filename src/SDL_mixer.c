@@ -356,7 +356,7 @@ static void InitDecoders(void)
 {
     for (int i = 0; i < SDL_arraysize(decoders); i++) {
         const Mix_Decoder *decoder = decoders[i];
-        if (decoder->init()) {
+        if (!decoder->init || decoder->init()) {
             available_decoders[num_available_decoders++] = decoder;
         }
     }
@@ -365,7 +365,9 @@ static void InitDecoders(void)
 static void QuitDecoders(void)
 {
     for (int i = 0; i < num_available_decoders; i++) {
-        available_decoders[i]->quit();
+        if (available_decoders[i]->quit) {
+            available_decoders[i]->quit();
+        }
         available_decoders[i] = NULL;
     }
     num_available_decoders = 0;

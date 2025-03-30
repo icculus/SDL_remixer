@@ -35,10 +35,6 @@ typedef struct RAW_UserData
     size_t position;
 } RAW_UserData;
 
-static bool SDLCALL RAW_init(void)
-{
-    return true;  // always succeeds.
-}
 
 // for use outside of this decoder.
 void *Mix_RAW_InitFromMemoryBuffer(void *data, const size_t datalen, const SDL_AudioSpec *spec)
@@ -142,11 +138,6 @@ static void SDLCALL RAW_quit_audio(void *audio_userdata)
     SDL_free(d);
 }
 
-static void SDLCALL RAW_quit(void)
-{
-    // no-op.
-}
-
 bool Mix_RAW_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
 {
     return RAW_init_track(audio_userdata, spec, props, userdata);
@@ -174,13 +165,13 @@ void Mix_RAW_quit_audio(void *audio_userdata)
 
 Mix_Decoder Mix_Decoder_RAW = {
     "RAW",
-    RAW_init,
+    NULL,  // init
     RAW_init_audio,
     RAW_init_track,
     RAW_decode,
     RAW_seek,
     RAW_quit_track,
     RAW_quit_audio,
-    RAW_quit
+    NULL  // quit
 };
 

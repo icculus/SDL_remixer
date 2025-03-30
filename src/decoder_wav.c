@@ -21,11 +21,6 @@
 
 #include "SDL_mixer_internal.h"
 
-static bool SDLCALL WAV_init(void)
-{
-    return true;  // already available without external dependencies.
-}
-
 static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata)
 {
     Uint8 *buffer = NULL;
@@ -45,20 +40,15 @@ static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
     return true;
 }
 
-static void SDLCALL WAV_quit(void)
-{
-    // no-op.
-}
-
 Mix_Decoder Mix_Decoder_WAV = {
     "WAV",
-    WAV_init,
+    NULL,  // init
     WAV_init_audio,
     Mix_RAW_init_track,
     Mix_RAW_decode,
     Mix_RAW_seek,
     Mix_RAW_quit_track,
     Mix_RAW_quit_audio,
-    WAV_quit
+    NULL  // quit
 };
 
