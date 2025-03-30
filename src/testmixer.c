@@ -22,7 +22,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         return SDL_APP_FAILURE;
     }
 
-    Mix_Audio *audio = Mix_LoadAudio("sample.aiff", false);
+    Mix_Audio *audio = Mix_LoadAudio("sample.voc", false);
     track = Mix_CreateTrack();
 
     Mix_SetTrackAudio(track, audio);

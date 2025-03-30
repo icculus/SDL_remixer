@@ -24,6 +24,7 @@
 #include "SDL_mixer_internal.h"
 
 static const Mix_Decoder *decoders[] = {
+    &Mix_Decoder_VOC,
     &Mix_Decoder_WAV,
     &Mix_Decoder_AIFF,
     &Mix_Decoder_RAW
@@ -470,6 +471,7 @@ static const Mix_Decoder *PrepareDecoder(SDL_IOStream *io, SDL_AudioSpec *spec, 
                 SDL_SetError("Can't seek in stream to find proper decoder");
                 return NULL;
             }
+            SDL_zerop(spec);  // make this zero again, in case init_audio changed it and then failed.
         }
     }
 

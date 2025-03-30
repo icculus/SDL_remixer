@@ -102,6 +102,7 @@ extern void Mix_RAW_quit_audio(void *audio_userdata);
 
 
 // these might not all be available, but they are all declared here as if they are.
+extern Mix_Decoder Mix_Decoder_VOC;
 extern Mix_Decoder Mix_Decoder_WAV;
 extern Mix_Decoder Mix_Decoder_AIFF;
 extern Mix_Decoder Mix_Decoder_RAW;
