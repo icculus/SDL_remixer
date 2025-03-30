@@ -64,6 +64,15 @@ extern SDL_DECLSPEC Mix_Audio * SDLCALL Mix_LoadAudioWithProperties(SDL_Properti
 #define MIX_PROP_AUDIO_LOAD_PREDECODE_BOOLEAN "SDL_mixer.audio.load.predecode"
 #define MIX_PROP_AUDIO_DECODER_STRING "SDL_mixer.audio.decoder"
 
+// Load raw PCM data to a Mix_Audio from an IOStream.
+extern SDL_DECLSPEC Mix_Audio * SDLCALL Mix_LoadRawAudio_IO(SDL_IOStream *io, const SDL_AudioSpec *spec, bool closeio);
+
+// Load raw PCM data to a Mix_Audio. If free_when_done==true, will be SDL_free()'d when the Mix_Audio is destroyed. Otherwise, it's never free'd by SDL_mixer.
+extern SDL_DECLSPEC Mix_Audio * SDLCALL Mix_LoadRawAudio(const void *data, size_t datalen, const SDL_AudioSpec *spec, bool copy);
+
+// just in case you need some audio to play, this will generate a sine wave forever when assigned to a playing Track.
+extern SDL_DECLSPEC Mix_Audio * SDLCALL Mix_CreateSineWaveAudio(int hz, float amplitude);
+
 
 extern SDL_DECLSPEC SDL_PropertiesID SDLCALL Mix_GetAudioProperties(Mix_Audio *audio);  // we can store audio format-specific metadata in here (artist/album/etc info...)
 

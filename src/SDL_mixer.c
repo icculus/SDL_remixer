@@ -27,6 +27,7 @@ static const Mix_Decoder *decoders[] = {
     &Mix_Decoder_VOC,
     &Mix_Decoder_WAV,
     &Mix_Decoder_AIFF,
+    &Mix_Decoder_SINEWAVE,
     &Mix_Decoder_RAW
 };
 
@@ -571,7 +572,8 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
     // set this before predecoding might change `decoder` to the RAW implementation.
     SDL_SetStringProperty(audio->props, MIX_PROP_AUDIO_DECODER_STRING, decoder->name);
 
-    if (predecode) {
+    // if this is already raw data, predecoding is just going to make a copy of it, so skip it.
+    if (predecode && (decoder->decode != Mix_RAW_decode)) {
         size_t decoded_len = 0;
         void *decoded = DecodeWholeFile(decoder, audio_userdata, &audio->spec, audio->props, &decoded_len);
         if (!decoded) {
@@ -579,7 +581,7 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
         }
         decoder->quit_audio(audio_userdata);
         decoder = NULL;
-        audio_userdata = Mix_RAW_InitFromMemoryBuffer(decoded, decoded_len, &audio->spec);
+        audio_userdata = Mix_RAW_InitFromMemoryBuffer(decoded, decoded_len, &audio->spec, true);
         if (audio_userdata) {
             decoder = &Mix_Decoder_RAW;
         } else {
@@ -646,6 +648,103 @@ Mix_Audio *Mix_LoadAudio(const char *path, bool predecode)
 
     SDL_IOStream *io = SDL_IOFromFile(path, "rb");
     return io ? Mix_LoadAudio_IO(io, predecode, true) : NULL;
+}
+
+Mix_Audio *Mix_LoadRawAudio_IO(SDL_IOStream *io, const SDL_AudioSpec *spec, bool closeio)
+{
+    if (!io) {
+        SDL_InvalidParamError("io");
+        return NULL;
+    }
+
+    const SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetStringProperty(props, MIX_PROP_AUDIO_DECODER_STRING, "RAW");
+    SDL_SetNumberProperty(props, MIX_PROP_DECODER_FORMAT_NUMBER, (Sint64) spec->format);
+    SDL_SetNumberProperty(props, MIX_PROP_DECODER_CHANNELS_NUMBER, (Sint64) spec->channels);
+    SDL_SetNumberProperty(props, MIX_PROP_DECODER_FREQ_NUMBER, (Sint64) spec->freq);
+    SDL_SetPointerProperty(props, MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER, io);
+    SDL_SetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_CLOSEIO_BOOLEAN, closeio);
+    Mix_Audio *audio = Mix_LoadAudioWithProperties(props);
+    SDL_DestroyProperties(props);
+    return audio;
+}
+
+Mix_Audio *Mix_LoadRawAudio(const void *data, size_t datalen, const SDL_AudioSpec *spec, bool free_when_done)
+{
+    if (!CheckInitialized()) {
+        return NULL;
+    } else if (!data) {
+        SDL_InvalidParamError("data");
+        return NULL;
+    } else if (!spec) {
+        SDL_InvalidParamError("spec");
+        return NULL;
+    }
+
+    Mix_Audio *audio = (Mix_Audio *) SDL_calloc(1, sizeof (*audio));
+    if (!audio) {
+        return NULL;
+    }
+
+    audio->props = SDL_CreateProperties();
+    if (!audio->props) {
+        SDL_free(audio);
+        return NULL;
+    }
+
+    SDL_SetStringProperty(audio->props, MIX_PROP_AUDIO_DECODER_STRING, "RAW");
+
+    audio->decoder_userdata = Mix_RAW_InitFromMemoryBuffer(data, datalen, spec, free_when_done);
+    if (!audio->decoder_userdata) {
+        SDL_DestroyProperties(audio->props);
+        SDL_free(audio);
+        return NULL;
+    }
+
+    audio->decoder = &Mix_Decoder_RAW;
+    SDL_copyp(&audio->spec, spec);
+    SDL_AtomicIncRef(&audio->refcount);
+
+    LockMixerState();
+    audio->next = all_audios;
+    if (all_audios) {
+        all_audios->prev = audio;
+    }
+    all_audios = audio;
+    UnlockMixerState();
+
+    return audio;
+}
+
+Mix_Audio *Mix_CreateSineWaveAudio(int hz, float amplitude)
+{
+    if (!CheckInitialized()) {
+        return NULL;
+    } else if (hz <= 0) {
+        SDL_InvalidParamError("hz");
+        return NULL;
+    } else if ((amplitude < 0.0f) || (amplitude > 1.0f)) {
+        SDL_InvalidParamError("amplitude");
+        return NULL;
+    }
+
+    SDL_AudioSpec device_spec;
+    if (!Mix_GetDeviceSpec(&device_spec)) {
+        return NULL;
+    }
+
+    const SDL_PropertiesID props = SDL_CreateProperties();
+    if (!props) {
+        return NULL;
+    }
+
+    SDL_SetStringProperty(props, MIX_PROP_AUDIO_DECODER_STRING, "SINEWAVE");
+    SDL_SetNumberProperty(props, MIX_PROP_DECODER_SINEWAVE_HZ_NUMBER, hz);
+    SDL_SetFloatProperty(props, MIX_PROP_DECODER_SINEWAVE_AMPLITUDE_FLOAT, amplitude);
+    SDL_SetNumberProperty(props, MIX_PROP_DECODER_SINEWAVE_SAMPLE_RATE_NUMBER, device_spec.freq);
+    Mix_Audio *audio = Mix_LoadAudioWithProperties(props);
+    SDL_DestroyProperties(props);
+    return audio;
 }
 
 SDL_PropertiesID Mix_GetAudioProperties(Mix_Audio *audio)

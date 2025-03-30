@@ -27,6 +27,7 @@ typedef struct RAW_AudioUserData
     size_t datalen;
     size_t framesize;
     size_t total_frames;
+    bool free_when_done;
 } RAW_AudioUserData;
 
 typedef struct RAW_UserData
@@ -37,7 +38,7 @@ typedef struct RAW_UserData
 
 
 // for use outside of this decoder.
-void *Mix_RAW_InitFromMemoryBuffer(void *data, const size_t datalen, const SDL_AudioSpec *spec)
+void *Mix_RAW_InitFromMemoryBuffer(const void *data, const size_t datalen, const SDL_AudioSpec *spec, bool free_when_done)
 {
     // we don't have to inspect the data, we treat anything as valid.
     RAW_AudioUserData *payload = (RAW_AudioUserData *) SDL_malloc(sizeof (*payload));
@@ -50,6 +51,7 @@ void *Mix_RAW_InitFromMemoryBuffer(void *data, const size_t datalen, const SDL_A
     payload->total_frames = datalen / payload->framesize;
     payload->datalen = payload->total_frames * payload->framesize;
     payload->data = data;
+    payload->free_when_done = free_when_done;
 
     return payload;
 }
@@ -80,7 +82,7 @@ static bool SDLCALL RAW_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
         return false;
     }
 
-    *audio_userdata = Mix_RAW_InitFromMemoryBuffer(data, datalen, spec);
+    *audio_userdata = Mix_RAW_InitFromMemoryBuffer(data, datalen, spec, true);
     if (!*audio_userdata) {
         SDL_free(data);
         return false;
@@ -89,7 +91,7 @@ static bool SDLCALL RAW_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
     return true;
 }
 
-static bool SDLCALL RAW_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+bool SDLCALL Mix_RAW_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
 {
     RAW_UserData *d = (RAW_UserData *) SDL_calloc(1, sizeof (*d));
     if (!d) {
@@ -102,7 +104,7 @@ static bool SDLCALL RAW_init_track(void *audio_userdata, const SDL_AudioSpec *sp
     return true;
 }
 
-static int SDLCALL RAW_decode(void *userdata, void *buffer, size_t buflen)
+int SDLCALL Mix_RAW_decode(void *userdata, void *buffer, size_t buflen)
 {
     RAW_UserData *d = (RAW_UserData *) userdata;
     const RAW_AudioUserData *payload = d->payload;
@@ -115,7 +117,7 @@ static int SDLCALL RAW_decode(void *userdata, void *buffer, size_t buflen)
     return cpy;
 }
 
-static bool SDLCALL RAW_seek(void *userdata, Uint64 frame)
+bool SDLCALL Mix_RAW_seek(void *userdata, Uint64 frame)
 {
     RAW_UserData *d = (RAW_UserData *) userdata;
     const RAW_AudioUserData *payload = d->payload;
@@ -126,52 +128,29 @@ static bool SDLCALL RAW_seek(void *userdata, Uint64 frame)
     return true;
 }
 
-static void SDLCALL RAW_quit_track(void *userdata)
+void SDLCALL Mix_RAW_quit_track(void *userdata)
 {
     SDL_free(userdata);
 }
 
-static void SDLCALL RAW_quit_audio(void *audio_userdata)
+void SDLCALL Mix_RAW_quit_audio(void *audio_userdata)
 {
     RAW_AudioUserData *d = (RAW_AudioUserData *) audio_userdata;
-    SDL_free((void *) d->data);
+    if (d->free_when_done) {
+        SDL_free((void *) d->data);
+    }
     SDL_free(d);
-}
-
-bool Mix_RAW_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
-{
-    return RAW_init_track(audio_userdata, spec, props, userdata);
-}
-
-int Mix_RAW_decode(void *userdata, void *buffer, size_t buflen)
-{
-    return RAW_decode(userdata, buffer, buflen);
-}
-
-bool Mix_RAW_seek(void *userdata, Uint64 frame)
-{
-    return RAW_seek(userdata, frame);
-}
-
-void Mix_RAW_quit_track(void *userdata)
-{
-    RAW_quit_track(userdata);
-}
-
-void Mix_RAW_quit_audio(void *audio_userdata)
-{
-    RAW_quit_audio(audio_userdata);
 }
 
 Mix_Decoder Mix_Decoder_RAW = {
     "RAW",
     NULL,  // init
     RAW_init_audio,
-    RAW_init_track,
-    RAW_decode,
-    RAW_seek,
-    RAW_quit_track,
-    RAW_quit_audio,
+    Mix_RAW_init_track,
+    Mix_RAW_decode,
+    Mix_RAW_seek,
+    Mix_RAW_quit_track,
+    Mix_RAW_quit_audio,
     NULL  // quit
 };
 

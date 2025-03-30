@@ -382,7 +382,7 @@ static bool SDLCALL VOC_init_audio(SDL_IOStream *src, SDL_AudioSpec *spec, SDL_P
         fillptr = ptr + (buflen - v.rest);
     }
 
-    *audio_userdata = Mix_RAW_InitFromMemoryBuffer(buffer, buflen, spec);
+    *audio_userdata = Mix_RAW_InitFromMemoryBuffer(buffer, buflen, spec, true);
     if (!*audio_userdata) {
         SDL_free(buffer);
         return false;

@@ -89,21 +89,25 @@ struct Mix_Track
 #define MIX_PROP_DECODER_FORMAT_NUMBER "SDL_mixer.decoder.format"
 #define MIX_PROP_DECODER_CHANNELS_NUMBER "SDL_mixer.decoder.channels"
 #define MIX_PROP_DECODER_FREQ_NUMBER "SDL_mixer.decoder.format"
+#define MIX_PROP_DECODER_SINEWAVE_HZ_NUMBER "SDL_mixer.decoder.sinewave.hz"
+#define MIX_PROP_DECODER_SINEWAVE_AMPLITUDE_FLOAT "SDL_mixer.decoder.sinewave.amplitude"
+#define MIX_PROP_DECODER_SINEWAVE_SAMPLE_RATE_NUMBER "SDL_mixer.decoder.sinewave.sample_rate"
 
 // access to the RAW "decoder" from other parts of SDL_mixer, without having to set up properties or copy the payload.
-extern void *Mix_RAW_InitFromMemoryBuffer(void *data, const size_t datalen, const SDL_AudioSpec *spec);
+extern void *Mix_RAW_InitFromMemoryBuffer(const void *data, const size_t datalen, const SDL_AudioSpec *spec, bool free_when_done);
 
 // decoders that are mostly picking out the raw PCM payload from an uncompressed format can use the RAW decoder for most of their implementation.
-extern bool Mix_RAW_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID metadata_props, void **userdata);
-extern int Mix_RAW_decode(void *userdata, void *buffer, size_t buflen);
-extern bool Mix_RAW_seek(void *userdata, Uint64 frame);
-extern void Mix_RAW_quit_track(void *userdata);
-extern void Mix_RAW_quit_audio(void *audio_userdata);
+extern bool SDLCALL Mix_RAW_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID metadata_props, void **userdata);
+extern int SDLCALL Mix_RAW_decode(void *userdata, void *buffer, size_t buflen);
+extern bool SDLCALL Mix_RAW_seek(void *userdata, Uint64 frame);
+extern void SDLCALL Mix_RAW_quit_track(void *userdata);
+extern void SDLCALL Mix_RAW_quit_audio(void *audio_userdata);
 
 
 // these might not all be available, but they are all declared here as if they are.
 extern Mix_Decoder Mix_Decoder_VOC;
 extern Mix_Decoder Mix_Decoder_WAV;
 extern Mix_Decoder Mix_Decoder_AIFF;
+extern Mix_Decoder Mix_Decoder_SINEWAVE;
 extern Mix_Decoder Mix_Decoder_RAW;
 
