@@ -25,8 +25,8 @@ typedef struct Mix_Decoder
 {
     const char *name;
     bool (SDLCALL *init)(void);   // initialize the decoder (load external libraries, etc).
-    bool (SDLCALL *init_audio)(const void *data, size_t datalen, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata);  // see if it's a supported format, init spec, set metadata in props, allocate static userdata.
-    bool (SDLCALL *init_track)(void *audio_userdata, const void *data, size_t datalen, const SDL_AudioSpec *spec, SDL_PropertiesID metadata_props, void **userdata);
+    bool (SDLCALL *init_audio)(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata);  // see if it's a supported format, init spec, set metadata in props, allocate static userdata and payload.
+    bool (SDLCALL *init_track)(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata);  // init decoder instance data for a single track.
     int  (SDLCALL *decode)(void *userdata, void *buffer, size_t buflen);
     bool (SDLCALL *seek)(void *userdata, Uint64 frame);
     void (SDLCALL *quit_track)(void *userdata);
@@ -90,6 +90,15 @@ struct Mix_Track
 #define MIX_PROP_DECODER_CHANNELS_NUMBER "SDL_mixer.decoder.channels"
 #define MIX_PROP_DECODER_FREQ_NUMBER "SDL_mixer.decoder.format"
 
+// access to the RAW "decoder" from other parts of SDL_mixer, without having to set up properties or copy the payload.
+extern void *Mix_RAW_InitFromMemoryBuffer(void *data, const size_t datalen, const SDL_AudioSpec *spec);
+
+// decoders that are mostly picking out the raw PCM payload from an uncompressed format can use the RAW decoder for most of their implementation.
+extern bool Mix_RAW_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID metadata_props, void **userdata);
+extern int Mix_RAW_decode(void *userdata, void *buffer, size_t buflen);
+extern bool Mix_RAW_seek(void *userdata, Uint64 frame);
+extern void Mix_RAW_quit_track(void *userdata);
+extern void Mix_RAW_quit_audio(void *audio_userdata);
 
 
 // these might not all be available, but they are all declared here as if they are.

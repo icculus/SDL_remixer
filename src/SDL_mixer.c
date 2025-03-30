@@ -455,14 +455,18 @@ bool Mix_GetDeviceSpec(SDL_AudioSpec *spec)
     return SDL_GetAudioDeviceFormat(audio_device, spec, NULL);
 }
 
-static const Mix_Decoder *ChooseDecoder(const void *buffer, size_t buflen, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata)
+static const Mix_Decoder *PrepareDecoder(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata)
 {
     const char *decoder_name = SDL_GetStringProperty(props, MIX_PROP_AUDIO_DECODER_STRING, NULL);
+    const Sint64 startpos = SDL_TellIO(io);
     for (int i = 0; i < num_available_decoders; i++) {
         const Mix_Decoder *decoder = available_decoders[i];
         if (!decoder_name || (SDL_strcasecmp(decoder->name, decoder_name) == 0)) {
-            if (decoder->init_audio(buffer, buflen, spec, props, audio_userdata)) {
+            if (decoder->init_audio(io, spec, props, audio_userdata)) {
                 return decoder;
+            } else if (SDL_SeekIO(io, startpos, SDL_IO_SEEK_SET) == -1) {
+                SDL_SetError("Can't seek in stream to find proper decoder");
+                return NULL;
             }
         }
     }
@@ -471,16 +475,16 @@ static const Mix_Decoder *ChooseDecoder(const void *buffer, size_t buflen, SDL_A
     return NULL;
 }
 
-static void *DecodeWholeFile(const Mix_Decoder *decoder, void *audio_userdata, void *buffer, size_t buflen, const SDL_AudioSpec *spec, SDL_PropertiesID props, size_t *decoded_len)
+static void *DecodeWholeFile(const Mix_Decoder *decoder, void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, size_t *decoded_len)
 {
     void *userdata = NULL;
-    if (!decoder->init_track(audio_userdata, buffer, buflen, spec, props, &userdata)) {
+    if (!decoder->init_track(audio_userdata, spec, props, &userdata)) {
         return NULL;
     }
 
     // start with the input data length, padded to some block size, and allocate that block size more each time, until we have the whole file.
     const size_t blocksize = 128 * 1024;
-    size_t allocated_bytes = ((buflen / blocksize) + 1) * blocksize;
+    size_t allocated_bytes = blocksize;
     Uint8 *decoded = (Uint8 *) SDL_malloc(allocated_bytes);
     if (!decoded) {
         decoder->quit_track(userdata);
@@ -536,13 +540,6 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
     void *audio_userdata = NULL;
     const Mix_Decoder *decoder = NULL;
 
-    // pull the whole thing into RAM, decoding or not.
-    size_t buflen = 0;
-    void *buffer = SDL_LoadFile_IO(io, &buflen, closeio);
-    if (!buffer) {
-        return NULL;
-    }
-
     Mix_Audio *audio = (Mix_Audio *) SDL_calloc(1, sizeof (*audio));
     if (!audio) {
         goto failed;
@@ -557,9 +554,14 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
         goto failed;
     }
 
-    decoder = ChooseDecoder(buffer, buflen, &audio->spec, audio->props, &audio_userdata);
+    decoder = PrepareDecoder(io, &audio->spec, audio->props, &audio_userdata);
     if (!decoder) {
         goto failed;
+    }
+
+    if (closeio) {
+        SDL_CloseIO(io);
+        io = NULL;
     }
 
     // set this before predecoding might change `decoder` to the RAW implementation.
@@ -567,20 +569,20 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
 
     if (predecode) {
         size_t decoded_len = 0;
-        void *decoded = DecodeWholeFile(decoder, audio_userdata, buffer, buflen, &audio->spec, audio->props, &decoded_len);
+        void *decoded = DecodeWholeFile(decoder, audio_userdata, &audio->spec, audio->props, &decoded_len);
         if (!decoded) {
             goto failed;
         }
-        SDL_free(buffer);
         decoder->quit_audio(audio_userdata);
-        buffer = decoded;
-        buflen = decoded_len;
-        decoder = &Mix_Decoder_RAW;
-        audio_userdata = NULL;   // this counts on the RAW decoder not using audio_userdata; otherwise we'll have to tapdance more to init_audio again, set properties, etc.
+        decoder = NULL;
+        audio_userdata = Mix_RAW_InitFromMemoryBuffer(decoded, decoded_len, &audio->spec);
+        if (audio_userdata) {
+            decoder = &Mix_Decoder_RAW;
+        } else {
+            goto failed;
+        }
     }
 
-    audio->buffer = buffer;
-    audio->buflen = buflen;
     audio->decoder = decoder;
     audio->decoder_userdata = audio_userdata;
 
@@ -597,13 +599,21 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
     return audio;
 
 failed:
-    SDL_free(buffer);
+    if (decoder) {
+        decoder->quit_audio(audio_userdata);
+    }
+
     if (audio) {
         if (audio->props) {
             SDL_DestroyProperties(audio->props);
         }
         SDL_free(audio);
     }
+
+    if (io && closeio) {
+        SDL_CloseIO(io);
+    }
+
     return NULL;
 }
 
@@ -816,7 +826,7 @@ bool Mix_SetTrackAudio(Mix_Track *track, Mix_Audio *audio)
 
     bool retval = true;
     if (audio) {
-        retval = audio->decoder->init_track(audio->decoder_userdata, audio->buffer, audio->buflen, &audio->spec, audio->props, &track->decoder_userdata);
+        retval = audio->decoder->init_track(audio->decoder_userdata, &audio->spec, audio->props, &track->decoder_userdata);
         if (!retval) {
             track->input_audio = NULL;
         } else {
