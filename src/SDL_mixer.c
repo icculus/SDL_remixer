@@ -787,7 +787,6 @@ static void UnrefAudio(Mix_Audio *audio)
         if (audio->props) {
             SDL_DestroyProperties(audio->props);
         }
-        SDL_free(audio->buffer);
         SDL_free(audio);
     }
 }

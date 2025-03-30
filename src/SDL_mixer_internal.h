@@ -45,8 +45,6 @@ struct Mix_Audio
 {
     SDL_AtomicInt refcount;
     SDL_PropertiesID props;
-    void *buffer;
-    size_t buflen;
     SDL_AudioSpec spec;
     const Mix_Decoder *decoder;
     void *decoder_userdata;
