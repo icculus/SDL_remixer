@@ -27,6 +27,7 @@ static const Mix_Decoder *decoders[] = {
     &Mix_Decoder_VOC,
     &Mix_Decoder_WAV,
     &Mix_Decoder_AIFF,
+    &Mix_Decoder_DRMP3,
     &Mix_Decoder_SINEWAVE,
     &Mix_Decoder_RAW
 };
@@ -558,6 +559,8 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
     if (props && !SDL_CopyProperties(props, audio->props)) {
         goto failed;
     }
+
+    // !!! FIXME: check for ID3/APE/MusicMatch/whatever tags here, in case they were slapped onto the edge of any random file format.
 
     decoder = PrepareDecoder(io, &audio->spec, audio->props, &audio_userdata);
     if (!decoder) {

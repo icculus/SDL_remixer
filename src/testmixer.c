@@ -22,7 +22,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         return SDL_APP_FAILURE;
     }
 
-    Mix_Audio *audio = Mix_LoadAudio("sample.voc", false);
+    Mix_Audio *audio = Mix_LoadAudio("sample.mp3", false);
+    if (!audio) {
+        SDL_Log("Failed to load audio: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
 
     track = Mix_CreateTrack();
     Mix_SetTrackAudio(track, audio);
@@ -30,7 +34,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 //Sint64 maxFrames, int loops, Sint64 startpos, Sint64 loop_start, Sint64 fadeIn, Sint64 append_silence_frames);
 
     // we cheat here with PlayOnce, since the sinewave decoder produces infinite audio.
-    Mix_PlayOnce(Mix_CreateSineWaveAudio(300, 0.25f));
+    //Mix_PlayOnce(Mix_CreateSineWaveAudio(300, 0.25f));
 
     return SDL_APP_CONTINUE;
 }

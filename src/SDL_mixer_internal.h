@@ -106,6 +106,7 @@ extern void SDLCALL Mix_RAW_quit_audio(void *audio_userdata);
 extern Mix_Decoder Mix_Decoder_VOC;
 extern Mix_Decoder Mix_Decoder_WAV;
 extern Mix_Decoder Mix_Decoder_AIFF;
+extern Mix_Decoder Mix_Decoder_DRMP3;
 extern Mix_Decoder Mix_Decoder_SINEWAVE;
 extern Mix_Decoder Mix_Decoder_RAW;
 
