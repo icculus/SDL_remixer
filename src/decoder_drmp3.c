@@ -43,7 +43,6 @@
 
 typedef struct DRMP3_AudioUserData
 {
-    drmp3 initial_state;
     void *buffer;
     size_t buflen;
     size_t framesize;
@@ -72,7 +71,8 @@ static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_
     // We keep a drmp3 decoder in its initial state and copy that struct for
     //  each track, so it doesn't have to do the initial MP3 parsing each time.
     // They all share the same const payload buffer, seek table, etc.
-    if (!drmp3_init_memory(&payload->initial_state, payload->buffer, payload->buflen, NULL)) {
+    drmp3 decoder;
+    if (!drmp3_init_memory(&decoder, payload->buffer, payload->buflen, NULL)) {
         SDL_free(payload->buffer);
         SDL_free(payload);
         return false;
@@ -82,11 +82,11 @@ static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_
     // (If any of this fails, we go on without it.)
     drmp3_uint64 num_mp3_frames = 0;
     drmp3_uint64 num_pcm_frames = 0;
-    if (drmp3_get_mp3_and_pcm_frame_count(&payload->initial_state, &num_mp3_frames, &num_pcm_frames)) {
+    if (drmp3_get_mp3_and_pcm_frame_count(&decoder, &num_mp3_frames, &num_pcm_frames)) {
         payload->num_seek_points = (drmp3_uint32) num_mp3_frames;
         payload->seek_points = (drmp3_seek_point *) SDL_calloc(num_mp3_frames, sizeof (*payload->seek_points));
         if (payload->seek_points) {
-            if (drmp3_calculate_seek_points(&payload->initial_state, &payload->num_seek_points, payload->seek_points)) {
+            if (drmp3_calculate_seek_points(&decoder, &payload->num_seek_points, payload->seek_points)) {
                 // shrink the array if possible.
                 if (payload->num_seek_points < ((drmp3_uint32) num_mp3_frames)) {
                     void *ptr = SDL_realloc(payload->seek_points, payload->num_seek_points * sizeof (*payload->seek_points));
@@ -94,7 +94,6 @@ static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_
                         payload->seek_points = (drmp3_seek_point *) ptr;
                     }
                 }
-                drmp3_bind_seek_table(&payload->initial_state, payload->num_seek_points, payload->seek_points);
             } else {  // failed, oh well. Live without.
                 SDL_free(payload->seek_points);
                 payload->seek_points = NULL;
@@ -106,8 +105,10 @@ static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_
     // !!! FIXME: set duration to num_pcm_frames.
 
     spec->format = SDL_AUDIO_F32;
-    spec->channels = (int) payload->initial_state.channels;
-    spec->freq = (int) payload->initial_state.sampleRate;
+    spec->channels = (int) decoder.channels;
+    spec->freq = (int) decoder.sampleRate;
+
+    drmp3_uninit(&decoder);
 
     payload->framesize = SDL_AUDIO_FRAMESIZE(*spec);
 
@@ -124,15 +125,12 @@ static bool SDLCALL DRMP3_init_track(void *audio_userdata, const SDL_AudioSpec *
         return false;
     }
 
+    if (!drmp3_init_memory(&d->decoder, payload->buffer, payload->buflen, NULL)) {
+        SDL_free(d);
+        return false;
+    }
+
     d->payload = payload;
-
-    // copy out the initial state and make sure this new instance has its own personal buffer (set it to NULL here so drmp3 allocates it on-demand).
-    SDL_memcpy(&d->decoder, &payload->initial_state, sizeof (d->decoder));
-    d->decoder.dataSize = 0;
-    d->decoder.dataCapacity = 0;
-    d->decoder.dataConsumed = 0;
-    d->decoder.pData = NULL;
-
     *userdata = d;
 
     return true;
@@ -162,7 +160,6 @@ static void SDLCALL DRMP3_quit_track(void *userdata)
 static void SDLCALL DRMP3_quit_audio(void *audio_userdata)
 {
     DRMP3_AudioUserData *payload = (DRMP3_AudioUserData *) audio_userdata;
-    drmp3_uninit(&payload->initial_state);
     SDL_free(payload->seek_points);
     SDL_free(payload->buffer);
     SDL_free(payload);
