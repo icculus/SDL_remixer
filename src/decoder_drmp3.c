@@ -83,6 +83,7 @@ static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_
     drmp3_uint64 num_mp3_frames = 0;
     drmp3_uint64 num_pcm_frames = 0;
     if (drmp3_get_mp3_and_pcm_frame_count(&decoder, &num_mp3_frames, &num_pcm_frames)) {
+        #if 0  // !!! FIXME: seek points are causing incorrect seeks, so it's either buggy or I'm doing this wrong.
         payload->num_seek_points = (drmp3_uint32) num_mp3_frames;
         payload->seek_points = (drmp3_seek_point *) SDL_calloc(num_mp3_frames, sizeof (*payload->seek_points));
         if (payload->seek_points) {
@@ -100,9 +101,10 @@ static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_
                 payload->num_seek_points = 0;
             }
         }
-    }
+        #endif
 
-    // !!! FIXME: set duration to num_pcm_frames.
+        // !!! FIXME: set duration to num_pcm_frames.
+    }
 
     spec->format = SDL_AUDIO_F32;
     spec->channels = (int) decoder.channels;
@@ -128,6 +130,10 @@ static bool SDLCALL DRMP3_init_track(void *audio_userdata, const SDL_AudioSpec *
     if (!drmp3_init_memory(&d->decoder, payload->buffer, payload->buflen, NULL)) {
         SDL_free(d);
         return false;
+    }
+
+    if (payload->seek_points) {
+        drmp3_bind_seek_table(&d->decoder, payload->num_seek_points, payload->seek_points);
     }
 
     d->payload = payload;
