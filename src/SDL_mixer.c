@@ -203,13 +203,25 @@ static int DecodeMore(Mix_Track *track, void *buffer, int buflen)
         decode_bytes = (decode_bytes / sizeof (float)) * srcfmtsize;
     }
 
-    int br = track->input_audio->decoder->decode(track->decoder_userdata, buffer, decode_bytes);
-    if ((br > 0) && (srcfmt != SDL_AUDIO_F32)) {
-        ConvertToFloat(track, buffer, br);
-        br = (br / srcfmtsize) * sizeof (float);
+    int retval = 0;
+    while (decode_bytes > 0) {
+        const int br = track->input_audio->decoder->decode(track->decoder_userdata, buffer, decode_bytes);
+        if (br <= 0) {
+            if ((br < 0) && (retval == 0)) {  // if we failed but already got some bytes, return those bytes this time. Otherwise, return an error.
+                retval = -1;
+            }
+            break;
+        }
+        decode_bytes -= br;
+        retval += br;
     }
 
-    return br;
+    if ((retval > 0) && (srcfmt != SDL_AUDIO_F32)) {
+        ConvertToFloat(track, buffer, retval);
+        retval = (retval / srcfmtsize) * sizeof (float);
+    }
+
+    return retval;
 }
 
 static int FillSilenceFrames(Mix_Track *track, void *buffer, int buflen)
