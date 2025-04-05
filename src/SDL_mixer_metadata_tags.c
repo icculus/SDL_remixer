@@ -67,13 +67,17 @@ static Sint32 read_sint32be(const Uint8 *data)
  *                  ID3v1                               *
  ********************************************************/
 
-#define ID3v1_TAG_SIZE          128
-#define ID3v1_SIZE_OF_FIELD     30
+#define ID3v1_TAG_SIZE           128
+#define ID3v1_SIZE_OF_FIELD      30
+#define ID3v1_SIZE_OF_YEAR_FIELD 4
 
 #define ID3v1_FIELD_TITLE       3
 #define ID3v1_FIELD_ARTIST      33
 #define ID3v1_FIELD_ALBUM       63
+#define ID3v1_FIELD_YEAR        93
 #define ID3v1_FIELD_COPYRIGHT   97
+#define ID3v1_FIELD_TRACK       125
+#define ID3v1_FIELD_GENRE       127
 
 static bool is_id3v1(const Uint8 *data, size_t length)
 {
@@ -113,6 +117,18 @@ static void parse_id3v1(SDL_PropertiesID props, const Uint8 *buffer)
     id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.artist",  buffer + ID3v1_FIELD_ARTIST,    ID3v1_SIZE_OF_FIELD);
     id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.album",   buffer + ID3v1_FIELD_ALBUM,     ID3v1_SIZE_OF_FIELD);
     id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.comment", buffer + ID3v1_FIELD_COPYRIGHT, ID3v1_SIZE_OF_FIELD);
+
+    if (!SDL_HasProperty(props, "SDL_mixer.metadata.id3v1.year")) {
+        char str[ID3v1_SIZE_OF_YEAR_FIELD + 1];
+        SDL_memcpy(str, buffer + ID3v1_FIELD_YEAR, ID3v1_SIZE_OF_YEAR_FIELD);
+        str[ID3v1_SIZE_OF_YEAR_FIELD] = '\0';
+        SDL_SetNumberProperty(props, "SDL_mixer.metadata.id3v1.year", (Sint64) SDL_atoi(str));
+    }
+
+    // ID3v1.1: if the second-to-last byte of the comment field is a zero (null terminator), treat the last byte as the track number (which should also be zero in ID3v1.0).
+    if ((buffer[ID3v1_FIELD_TRACK] == 0) && !SDL_HasProperty(props, "SDL_mixer.metadata.id3v1.track")) {
+        SDL_SetNumberProperty(props, "SDL_mixer.metadata.id3v1.track", (Sint64) buffer[ID3v1_FIELD_TRACK+1]);
+    }
 }
 
 /********************************************************
