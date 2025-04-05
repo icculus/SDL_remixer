@@ -21,7 +21,7 @@
 
 #include "SDL_mixer_internal.h"
 
-static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata)
+static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
     Uint8 *buffer = NULL;
     Uint32 buflen = 0;
@@ -31,7 +31,7 @@ static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
         return false;
     }
 
-    *audio_userdata = Mix_RAW_InitFromMemoryBuffer(buffer, (size_t) buflen, spec, true);
+    *audio_userdata = Mix_RAW_InitFromMemoryBuffer(buffer, (size_t) buflen, spec, duration_frames, true);
     if (!*audio_userdata) {
         SDL_free(buffer);
         return false;

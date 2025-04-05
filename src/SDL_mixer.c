@@ -472,13 +472,13 @@ bool Mix_GetDeviceSpec(SDL_AudioSpec *spec)
     return SDL_GetAudioDeviceFormat(audio_device, spec, NULL);
 }
 
-static const Mix_Decoder *PrepareDecoder(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata)
+static const Mix_Decoder *PrepareDecoder(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
     const char *decoder_name = SDL_GetStringProperty(props, MIX_PROP_AUDIO_DECODER_STRING, NULL);
     for (int i = 0; i < num_available_decoders; i++) {
         const Mix_Decoder *decoder = available_decoders[i];
         if (!decoder_name || (SDL_strcasecmp(decoder->name, decoder_name) == 0)) {
-            if (decoder->init_audio(io, spec, props, audio_userdata)) {
+            if (decoder->init_audio(io, spec, props, duration_frames, audio_userdata)) {
                 return decoder;
             } else if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) == -1) {   // note this seeks to offset 0, because we're using an IoClamp.
                 SDL_SetError("Can't seek in stream to find proper decoder");
@@ -540,7 +540,6 @@ static void *DecodeWholeFile(const Mix_Decoder *decoder, void *audio_userdata, c
         decoded = (Uint8 *) ptr;
     }
 
-    // !!! FIXME: we know the exact duration of the audio now, since we can count total sample frames, so always set the duration property even if the decoder set it, since it might have been estimating or just wrong.
     *decoded_len = decoded_bytes;
     return decoded;
 }
@@ -558,6 +557,7 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
     const Mix_Decoder *decoder = NULL;
     SDL_IOStream *io = NULL;
     Mix_IoClamp clamp;
+    Sint64 duration_frames = -1;
 
     Mix_Audio *audio = (Mix_Audio *) SDL_calloc(1, sizeof (*audio));
     if (!audio) {
@@ -585,7 +585,7 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
         Mix_ReadMetadataTags(io, audio->props, &clamp);
     }
 
-    decoder = PrepareDecoder(io, &audio->spec, audio->props, &audio_userdata);
+    decoder = PrepareDecoder(io, &audio->spec, audio->props, &duration_frames, &audio_userdata);
     if (!decoder) {
         goto failed;
     }
@@ -613,7 +613,7 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
         }
         decoder->quit_audio(audio_userdata);
         decoder = NULL;
-        audio_userdata = Mix_RAW_InitFromMemoryBuffer(decoded, decoded_len, &audio->spec, true);
+        audio_userdata = Mix_RAW_InitFromMemoryBuffer(decoded, decoded_len, &audio->spec, &duration_frames, true);
         if (audio_userdata) {
             decoder = &Mix_Decoder_RAW;
         } else {
@@ -623,6 +623,10 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
 
     audio->decoder = decoder;
     audio->decoder_userdata = audio_userdata;
+
+    if (duration_frames >= 0) {
+        SDL_SetNumberProperty(audio->props, MIX_PROP_METADATA_DURATION_FRAMES_NUMBER, duration_frames);
+    }
 
     SDL_AtomicIncRef(&audio->refcount);
 
@@ -730,12 +734,16 @@ Mix_Audio *Mix_LoadRawAudio(const void *data, size_t datalen, const SDL_AudioSpe
 
     SDL_SetStringProperty(audio->props, MIX_PROP_AUDIO_DECODER_STRING, "RAW");
 
-    audio->decoder_userdata = Mix_RAW_InitFromMemoryBuffer(data, datalen, spec, free_when_done);
+    Sint64 duration_frames = -1;
+    audio->decoder_userdata = Mix_RAW_InitFromMemoryBuffer(data, datalen, spec, &duration_frames, free_when_done);
     if (!audio->decoder_userdata) {
         SDL_DestroyProperties(audio->props);
         SDL_free(audio);
         return NULL;
     }
+
+    SDL_assert(duration_frames >= 0);
+    SDL_SetNumberProperty(audio->props, MIX_PROP_METADATA_DURATION_FRAMES_NUMBER, duration_frames);
 
     audio->decoder = &Mix_Decoder_RAW;
     SDL_copyp(&audio->spec, spec);

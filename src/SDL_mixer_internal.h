@@ -25,7 +25,7 @@ typedef struct Mix_Decoder
 {
     const char *name;
     bool (SDLCALL *init)(void);   // initialize the decoder (load external libraries, etc).
-    bool (SDLCALL *init_audio)(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata);  // see if it's a supported format, init spec, set metadata in props, allocate static userdata and payload.
+    bool (SDLCALL *init_audio)(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata);  // see if it's a supported format, init spec, set metadata in props, allocate static userdata and payload.
     bool (SDLCALL *init_track)(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata);  // init decoder instance data for a single track.
     int  (SDLCALL *decode)(void *userdata, void *buffer, size_t buflen);
     bool (SDLCALL *seek)(void *userdata, Uint64 frame);
@@ -108,7 +108,7 @@ extern SDL_IOStream *Mix_OpenIoClamp(Mix_IoClamp *clamp, SDL_IOStream *io);
 
 
 // access to the RAW "decoder" from other parts of SDL_mixer, without having to set up properties or copy the payload.
-extern void *Mix_RAW_InitFromMemoryBuffer(const void *data, const size_t datalen, const SDL_AudioSpec *spec, bool free_when_done);
+extern void *Mix_RAW_InitFromMemoryBuffer(const void *data, const size_t datalen, const SDL_AudioSpec *spec, Sint64 *duration_frames, bool free_when_done);
 
 // decoders that are mostly picking out the raw PCM payload from an uncompressed format can use the RAW decoder for most of their implementation.
 extern bool SDLCALL Mix_RAW_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID metadata_props, void **userdata);

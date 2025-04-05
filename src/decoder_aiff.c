@@ -60,7 +60,7 @@ static Uint32 SANE_to_Uint32 (Uint8 *sanebuf)
         | (sanebuf[5] >> 1)) >> (29 - sanebuf[1]);
 }
 
-static bool SDLCALL AIFF_init_audio(SDL_IOStream *src, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata)
+static bool SDLCALL AIFF_init_audio(SDL_IOStream *src, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
     bool found_SSND = false;
     bool found_COMM = false;
@@ -220,7 +220,7 @@ static bool SDLCALL AIFF_init_audio(SDL_IOStream *src, SDL_AudioSpec *spec, SDL_
         return false;
     }
 
-    *audio_userdata = Mix_RAW_InitFromMemoryBuffer(buffer, buflen, spec, true);
+    *audio_userdata = Mix_RAW_InitFromMemoryBuffer(buffer, buflen, spec, duration_frames, true);
     if (!*audio_userdata) {
         SDL_free(buffer);
         return false;

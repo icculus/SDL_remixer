@@ -34,7 +34,7 @@ typedef struct SINEWAVE_UserData
     int current_sine_sample;
 } SINEWAVE_UserData;
 
-static bool SDLCALL SINEWAVE_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata)
+static bool SDLCALL SINEWAVE_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
     const char *decoder_name = SDL_GetStringProperty(props, MIX_PROP_AUDIO_DECODER_STRING, NULL);
     if (!decoder_name || (SDL_strcasecmp(decoder_name, "sinewave") != 0)) {
@@ -62,6 +62,7 @@ static bool SDLCALL SINEWAVE_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, S
     payload->amplitude = famp;
     payload->sample_rate = spec->freq;
 
+    *duration_frames = -1;  // it's infinite.
     *audio_userdata = payload;
     return true;
 }

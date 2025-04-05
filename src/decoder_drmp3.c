@@ -59,7 +59,7 @@ typedef struct DRMP3_UserData
     drmp3 decoder;
 } DRMP3_UserData;
 
-static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata)
+static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
     DRMP3_AudioUserData *payload = (DRMP3_AudioUserData *) SDL_calloc(1, sizeof(*payload));
     if (!payload) {
@@ -105,8 +105,6 @@ static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_
             }
         }
         #endif
-
-        // !!! FIXME: set duration to num_pcm_frames.
     }
 
     spec->format = SDL_AUDIO_F32;
@@ -117,6 +115,7 @@ static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_
 
     payload->framesize = SDL_AUDIO_FRAMESIZE(*spec);
 
+    *duration_frames = num_pcm_frames;
     *audio_userdata = payload;
 
     return true;

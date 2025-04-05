@@ -332,7 +332,7 @@ static Uint32 voc_read(SDL_IOStream *src, vs_t *v, Uint8 *buf, SDL_AudioSpec *sp
     return (Uint32)done;
 }
 
-static bool SDLCALL VOC_init_audio(SDL_IOStream *src, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata)
+static bool SDLCALL VOC_init_audio(SDL_IOStream *src, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
     if (!voc_check_header(src)) {
         return false;
@@ -382,7 +382,7 @@ static bool SDLCALL VOC_init_audio(SDL_IOStream *src, SDL_AudioSpec *spec, SDL_P
         fillptr = ptr + (buflen - v.rest);
     }
 
-    *audio_userdata = Mix_RAW_InitFromMemoryBuffer(buffer, buflen, spec, true);
+    *audio_userdata = Mix_RAW_InitFromMemoryBuffer(buffer, buflen, spec, duration_frames, true);
     if (!*audio_userdata) {
         SDL_free(buffer);
         return false;
