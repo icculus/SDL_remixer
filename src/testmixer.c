@@ -7,41 +7,64 @@
 //static SDL_Renderer *renderer = NULL;
 static Mix_Track *track = NULL;
 
-static void SDLCALL LogMetadata(void *userdata, SDL_PropertiesID props, const char *name)
+static void LogMetadata(SDL_PropertiesID props, const char *name)
 {
-    const char *audiofname = (const char *) userdata;
-
     switch (SDL_GetPropertyType(props, name)) {
         case SDL_PROPERTY_TYPE_INVALID:
-            SDL_Log("%s metadata: %s [invalid type]", audiofname, name);
+            SDL_Log(" - %s [invalid type]", name);
             break;
 
         case SDL_PROPERTY_TYPE_POINTER:
-            SDL_Log("%s metadata: %s [pointer=%p]", audiofname, name, SDL_GetPointerProperty(props, name, NULL));
+            SDL_Log(" - %s [pointer=%p]", name, SDL_GetPointerProperty(props, name, NULL));
             break;
 
         case SDL_PROPERTY_TYPE_STRING:
-            SDL_Log("%s metadata: %s [string=\"%s\"]", audiofname, name, SDL_GetStringProperty(props, name, ""));
+            SDL_Log(" - %s [string=\"%s\"]", name, SDL_GetStringProperty(props, name, ""));
             break;
 
         case SDL_PROPERTY_TYPE_NUMBER:
-            SDL_Log("%s metadata: %s [number=%" SDL_PRIs64 "]", audiofname, name, SDL_GetNumberProperty(props, name, 0));
+            SDL_Log(" - %s [number=%" SDL_PRIs64 "]", name, SDL_GetNumberProperty(props, name, 0));
             break;
 
         case SDL_PROPERTY_TYPE_FLOAT:
-            SDL_Log("%s metadata: %s [float=%f]", audiofname, name, SDL_GetFloatProperty(props, name, 0.0f));
+            SDL_Log(" - %s [float=%f]", name, SDL_GetFloatProperty(props, name, 0.0f));
             break;
 
         case SDL_PROPERTY_TYPE_BOOLEAN:
-            SDL_Log("%s metadata: %s [boolean=%s]", audiofname, name, SDL_GetBooleanProperty(props, name, false) ? "true" : "false");
+            SDL_Log(" - %s [boolean=%s]", name, SDL_GetBooleanProperty(props, name, false) ? "true" : "false");
             break;
 
         default:
-            SDL_Log("%s metadata: %s [unknown type]", audiofname, name);
+            SDL_Log(" - %s [unknown type]", name);
             break;
     }
 }
 
+typedef struct MetadataKeys
+{
+    char **keys;
+    size_t num_keys;
+} MetadataKeys;
+
+static void SDLCALL CollectMetadata(void *userdata, SDL_PropertiesID props, const char *name)
+{
+    MetadataKeys *mkeys = (MetadataKeys *) userdata;
+    char *key = SDL_strdup(name);
+    if (key) {
+        void *ptr = SDL_realloc(mkeys->keys, (mkeys->num_keys + 1) * sizeof (*mkeys->keys));
+        if (!ptr) {
+            SDL_free(key);
+        } else {
+            mkeys->keys = (char **) ptr;
+            mkeys->keys[mkeys->num_keys++] = key;
+        }
+    }
+}
+
+static int SDLCALL CompareMetadataKeys(const void *a, const void *b)
+{
+    return SDL_strcmp(*(const char **) a, *(const char **) b);
+}
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
@@ -65,7 +88,27 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         return SDL_APP_FAILURE;
     }
 
-    SDL_EnumerateProperties(Mix_GetAudioProperties(audio), LogMetadata, (void *) audiofname);
+    SDL_Log("%s metadata:", audiofname);
+    SDL_PropertiesID props = Mix_GetAudioProperties(audio);
+    bool had_metadata = false;
+    if (props) {
+        MetadataKeys mkeys;
+        SDL_zero(mkeys);
+        SDL_EnumerateProperties(props, CollectMetadata, &mkeys);
+        if (mkeys.num_keys > 0) {
+            SDL_qsort(mkeys.keys, mkeys.num_keys, sizeof (*mkeys.keys), CompareMetadataKeys);
+            for (size_t i = 0; i < mkeys.num_keys; i++) {
+                LogMetadata(props, mkeys.keys[i]);
+                SDL_free(mkeys.keys[i]);
+                had_metadata = true;
+            }
+        }
+        SDL_free(mkeys.keys);
+    }
+
+    if (!had_metadata) {
+        SDL_Log(" - [none]");
+    }
 
     track = Mix_CreateTrack();
     Mix_SetTrackAudio(track, audio);
