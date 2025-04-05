@@ -39,6 +39,9 @@
 #define DRMP3_MALLOC(sz) SDL_malloc((sz))
 #define DRMP3_REALLOC(p, sz) SDL_realloc((p), (sz))
 #define DRMP3_FREE(p) SDL_free((p))
+
+// !!! FIXME: we need a DRMP3_NO_PARSE_METADATA_TAGS option to remove the ID3/APE checks, since we filtered them elsewhere.
+
 #include "dr_libs/dr_mp3.h"
 
 typedef struct DRMP3_AudioUserData
