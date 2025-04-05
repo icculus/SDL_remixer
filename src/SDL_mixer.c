@@ -475,13 +475,12 @@ bool Mix_GetDeviceSpec(SDL_AudioSpec *spec)
 static const Mix_Decoder *PrepareDecoder(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, void **audio_userdata)
 {
     const char *decoder_name = SDL_GetStringProperty(props, MIX_PROP_AUDIO_DECODER_STRING, NULL);
-    const Sint64 startpos = SDL_TellIO(io);
     for (int i = 0; i < num_available_decoders; i++) {
         const Mix_Decoder *decoder = available_decoders[i];
         if (!decoder_name || (SDL_strcasecmp(decoder->name, decoder_name) == 0)) {
             if (decoder->init_audio(io, spec, props, audio_userdata)) {
                 return decoder;
-            } else if (SDL_SeekIO(io, startpos, SDL_IO_SEEK_SET) == -1) {
+            } else if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) == -1) {   // note this seeks to offset 0, because we're using an IoClamp.
                 SDL_SetError("Can't seek in stream to find proper decoder");
                 return NULL;
             }
@@ -552,11 +551,13 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
         return NULL;
     }
 
-    SDL_IOStream *io = (SDL_IOStream *) SDL_GetPointerProperty(props, MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER, NULL);
+    SDL_IOStream *origio = (SDL_IOStream *) SDL_GetPointerProperty(props, MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER, NULL);
     const bool closeio = SDL_GetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_CLOSEIO_BOOLEAN, false);
     const bool predecode = SDL_GetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_PREDECODE_BOOLEAN, false);
     void *audio_userdata = NULL;
     const Mix_Decoder *decoder = NULL;
+    SDL_IOStream *io = NULL;
+    Mix_IoClamp clamp;
 
     Mix_Audio *audio = (Mix_Audio *) SDL_calloc(1, sizeof (*audio));
     if (!audio) {
@@ -572,16 +573,32 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
         goto failed;
     }
 
-    // !!! FIXME: check for ID3/APE/MusicMatch/whatever tags here, in case they were slapped onto the edge of any random file format.
+    // check for ID3/APE/MusicMatch/whatever tags here, in case they were slapped onto the edge of any random file format.
+    // !!! FIXME: add a property to skip tag detection, for apps that know they don't have them, or don't want them, and want to save some CPU and i/o.
+    if (origio) {
+        io = Mix_OpenIoClamp(&clamp, origio);
+        if (!io) {
+            goto failed;
+        }
+
+        // !!! FIXME: currently we're ignoring return values from this function (see FIXME at the top of its code).
+        Mix_ReadMetadataTags(io, audio->props, &clamp);
+    }
 
     decoder = PrepareDecoder(io, &audio->spec, audio->props, &audio_userdata);
     if (!decoder) {
         goto failed;
     }
 
-    if (closeio) {
-        SDL_CloseIO(io);
+    if (io) {
+        SDL_CloseIO(io);  // IoClamp's close doesn't close the original stream, but we still need to free its resources here.
         io = NULL;
+    }
+
+    if (closeio) {
+        SDL_CloseIO(origio);
+        origio = NULL;
+        SDL_ClearProperty(audio->props, MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER);
     }
 
     // set this before predecoding might change `decoder` to the RAW implementation.
@@ -631,8 +648,12 @@ failed:
         SDL_free(audio);
     }
 
-    if (io && closeio) {
-        SDL_CloseIO(io);
+    if (io) {
+        SDL_CloseIO(io);  // IoClamp's close doesn't close the original stream, but we still need to free its resources here.
+    }
+
+    if (origio && closeio) {
+        SDL_CloseIO(origio);
     }
 
     return NULL;
@@ -1594,5 +1615,70 @@ bool Mix_SetTrackMix(Mix_Track *track, Mix_TrackMixCallback cb, void *userdata)
     track->mix_callback_userdata = userdata;
     UnlockTrack(track);
     return true;
+}
+
+
+// Clamp an IOStream to a subset of its available data.
+static Sint64 Mix_IoClamp_size(void *userdata)
+{
+    return ((const Mix_IoClamp *) userdata)->length;
+}
+
+static Sint64 Mix_IoClamp_seek(void *userdata, Sint64 offset, SDL_IOWhence whence)
+{
+    Mix_IoClamp *clamp = (Mix_IoClamp *) userdata;
+
+    if (whence == SDL_IO_SEEK_CUR) {
+        offset += clamp->pos;
+    } else if (whence == SDL_IO_SEEK_END) {
+        offset += clamp->length;
+    }
+
+    if (offset < 0) {
+        SDL_SetError("Seek before start of data");
+        return -1;
+    } else if (offset > clamp->length) {
+        offset = clamp->length;
+    }
+
+    if (clamp->pos != offset) {
+        const Sint64 ret = SDL_SeekIO(clamp->io, clamp->start + offset, SDL_IO_SEEK_SET);
+        if (ret < 0) {
+            return ret;
+        }
+        clamp->pos = offset;
+    }
+
+    return offset;
+}
+
+static size_t Mix_IoClamp_read(void *userdata, void *ptr, size_t size, SDL_IOStatus *status)
+{
+    Mix_IoClamp *clamp = (Mix_IoClamp *) userdata;
+    const size_t remaining = (size_t)(clamp->length - clamp->pos);
+    const size_t ret = SDL_ReadIO(clamp->io, ptr, SDL_min(size, remaining));
+    clamp->pos += ret;
+    return ret;
+}
+
+SDL_IOStream *Mix_OpenIoClamp(Mix_IoClamp *clamp, SDL_IOStream *io)
+{
+    /* Don't use SDL_GetIOSize() here -- see SDL bug #4026 */
+    SDL_zerop(clamp);
+    clamp->io = io;
+    clamp->start = SDL_TellIO(io);
+    clamp->length = SDL_SeekIO(io, 0, SDL_IO_SEEK_END) - clamp->start;
+    clamp->pos = 0;
+    if (clamp->start < 0 || clamp->length < 0 || (SDL_SeekIO(io, clamp->start, SDL_IO_SEEK_SET) < 0)) {
+        SDL_SetError("Error seeking in datastream");
+        return NULL;
+    }
+
+    SDL_IOStreamInterface iface;
+    SDL_INIT_INTERFACE(&iface);
+    iface.size = Mix_IoClamp_size;
+    iface.seek = Mix_IoClamp_seek;
+    iface.read = Mix_IoClamp_read;
+    return SDL_OpenIO(&iface, clamp);
 }
 

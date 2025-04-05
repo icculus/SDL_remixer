@@ -7,6 +7,42 @@
 //static SDL_Renderer *renderer = NULL;
 static Mix_Track *track = NULL;
 
+static void SDLCALL LogMetadata(void *userdata, SDL_PropertiesID props, const char *name)
+{
+    const char *audiofname = (const char *) userdata;
+
+    switch (SDL_GetPropertyType(props, name)) {
+        case SDL_PROPERTY_TYPE_INVALID:
+            SDL_Log("%s metadata: %s [invalid type]", audiofname, name);
+            break;
+
+        case SDL_PROPERTY_TYPE_POINTER:
+            SDL_Log("%s metadata: %s [pointer=%p]", audiofname, name, SDL_GetPointerProperty(props, name, NULL));
+            break;
+
+        case SDL_PROPERTY_TYPE_STRING:
+            SDL_Log("%s metadata: %s [string=\"%s\"]", audiofname, name, SDL_GetStringProperty(props, name, ""));
+            break;
+
+        case SDL_PROPERTY_TYPE_NUMBER:
+            SDL_Log("%s metadata: %s [number=%" SDL_PRIs64 "]", audiofname, name, SDL_GetNumberProperty(props, name, 0));
+            break;
+
+        case SDL_PROPERTY_TYPE_FLOAT:
+            SDL_Log("%s metadata: %s [float=%f]", audiofname, name, SDL_GetFloatProperty(props, name, 0.0f));
+            break;
+
+        case SDL_PROPERTY_TYPE_BOOLEAN:
+            SDL_Log("%s metadata: %s [boolean=%s]", audiofname, name, SDL_GetBooleanProperty(props, name, false) ? "true" : "false");
+            break;
+
+        default:
+            SDL_Log("%s metadata: %s [unknown type]", audiofname, name);
+            break;
+    }
+}
+
+
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
     SDL_SetAppMetadata("Test SDL_mixer", "1.0", "org.libsdl.testmixer");
@@ -22,11 +58,14 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         return SDL_APP_FAILURE;
     }
 
-    Mix_Audio *audio = Mix_LoadAudio("sample.mp3", false);
+    const char *audiofname = "sample.mp3";
+    Mix_Audio *audio = Mix_LoadAudio(audiofname, false);
     if (!audio) {
         SDL_Log("Failed to load audio: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
+
+    SDL_EnumerateProperties(Mix_GetAudioProperties(audio), LogMetadata, (void *) audiofname);
 
     track = Mix_CreateTrack();
     Mix_SetTrackAudio(track, audio);

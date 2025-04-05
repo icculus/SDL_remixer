@@ -82,6 +82,7 @@ struct Mix_Track
     Mix_Track *fire_and_forget_next;  // linked list for the fire-and-forget pool.
 };
 
+
 // these are not (currently) available in the public API, and may change names or functionality, or be removed.
 #define MIX_PROP_DECODER_NAME_STRING "SDL_mixer.decoder.name"
 #define MIX_PROP_DECODER_FORMAT_NUMBER "SDL_mixer.decoder.format"
@@ -90,6 +91,21 @@ struct Mix_Track
 #define MIX_PROP_DECODER_SINEWAVE_HZ_NUMBER "SDL_mixer.decoder.sinewave.hz"
 #define MIX_PROP_DECODER_SINEWAVE_AMPLITUDE_FLOAT "SDL_mixer.decoder.sinewave.amplitude"
 #define MIX_PROP_DECODER_SINEWAVE_SAMPLE_RATE_NUMBER "SDL_mixer.decoder.sinewave.sample_rate"
+
+
+// Clamp an IOStream to a subset of its available data...this is used to cut ID3 (etc) tags off
+//  both ends of an audio file, making it look like the file just doesn't have those bytes.
+
+typedef struct Mix_IoClamp
+{
+    SDL_IOStream *io;
+    Sint64 start;
+    Sint64 length;
+    Sint64 pos;
+} Mix_IoClamp;
+
+extern SDL_IOStream *Mix_OpenIoClamp(Mix_IoClamp *clamp, SDL_IOStream *io);
+
 
 // access to the RAW "decoder" from other parts of SDL_mixer, without having to set up properties or copy the payload.
 extern void *Mix_RAW_InitFromMemoryBuffer(const void *data, const size_t datalen, const SDL_AudioSpec *spec, bool free_when_done);
@@ -101,6 +117,9 @@ extern bool SDLCALL Mix_RAW_seek(void *userdata, Uint64 frame);
 extern void SDLCALL Mix_RAW_quit_track(void *userdata);
 extern void SDLCALL Mix_RAW_quit_audio(void *audio_userdata);
 
+// Parse through an SDL_IOStream for tags (ID3, APE, MusicMatch, etc), and add metadata to props.
+// !!! FIXME: see FIXME in the function's implementation; just ignore return values from this function for now.
+extern bool Mix_ReadMetadataTags(SDL_IOStream *io, SDL_PropertiesID props, Mix_IoClamp *clamp);
 
 // these might not all be available, but they are all declared here as if they are.
 extern Mix_Decoder Mix_Decoder_VOC;
