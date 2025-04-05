@@ -78,7 +78,7 @@ static Sint32 read_sint32be(const Uint8 *data)
 static bool is_id3v1(const Uint8 *data, size_t length)
 {
     // https://id3.org/ID3v1 :  3 bytes "TAG" identifier and 125 bytes tag data
-    return ((length < ID3v1_TAG_SIZE) && (SDL_memcmp(data, "TAG", 3) == 0));
+    return ((length >= ID3v1_TAG_SIZE) && (SDL_memcmp(data, "TAG", 3) == 0));
 }
 
 // Parse ISO-8859-1 string and convert it into UTF-8
@@ -97,20 +97,22 @@ static char *parse_id3v1_ansi_string(const Uint8 *buffer, size_t src_len)
 
 static void id3v1_set_tag(SDL_PropertiesID props, const char *key, const Uint8 *buffer, size_t len)
 {
-    char *src_buf = parse_id3v1_ansi_string(buffer, len);
-    if (src_buf) {
-        SDL_SetStringProperty(props, key, src_buf);
-        SDL_free(src_buf);
+    if (!SDL_HasProperty(props, key)) {  // in case there are multiple ID3v1 tags appended to a file, we'll take the last one, since we parse backwards from the end of file.
+        char *src_buf = parse_id3v1_ansi_string(buffer, len);
+        if (src_buf) {
+            SDL_SetStringProperty(props, key, src_buf);
+            SDL_free(src_buf);
+        }
     }
 }
 
 // Parse content of ID3v1 tag
 static void parse_id3v1(SDL_PropertiesID props, const Uint8 *buffer)
 {
-    id3v1_set_tag(props, MIX_PROP_METADATA_TITLE_STRING,     buffer + ID3v1_FIELD_TITLE,     ID3v1_SIZE_OF_FIELD);
-    id3v1_set_tag(props, MIX_PROP_METADATA_ARTIST_STRING,    buffer + ID3v1_FIELD_ARTIST,    ID3v1_SIZE_OF_FIELD);
-    id3v1_set_tag(props, MIX_PROP_METADATA_ALBUM_STRING,     buffer + ID3v1_FIELD_ALBUM,     ID3v1_SIZE_OF_FIELD);
-    id3v1_set_tag(props, MIX_PROP_METADATA_COPYRIGHT_STRING, buffer + ID3v1_FIELD_COPYRIGHT, ID3v1_SIZE_OF_FIELD);
+    id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.title",   buffer + ID3v1_FIELD_TITLE,     ID3v1_SIZE_OF_FIELD);
+    id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.artist",  buffer + ID3v1_FIELD_ARTIST,    ID3v1_SIZE_OF_FIELD);
+    id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.album",   buffer + ID3v1_FIELD_ALBUM,     ID3v1_SIZE_OF_FIELD);
+    id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.comment", buffer + ID3v1_FIELD_COPYRIGHT, ID3v1_SIZE_OF_FIELD);
 }
 
 /********************************************************
@@ -257,7 +259,6 @@ static char *id3v2_decode_string(const Uint8 *string, size_t size)
 static void set_id3v2_string_prop(SDL_PropertiesID props, const char *key, const Uint8 *string, size_t size)
 {
     char *str_buffer = id3v2_decode_string(string, size);
-
     if (str_buffer) {
         SDL_SetStringProperty(props, key, str_buffer);
         SDL_free(str_buffer);
@@ -267,36 +268,46 @@ static void set_id3v2_string_prop(SDL_PropertiesID props, const char *key, const
 // Identify a meta-key and decode the string (Note: input buffer should have at least 4 characters!)
 static void handle_id3v2_string(SDL_PropertiesID props, const char *key, const Uint8 *string, size_t size)
 {
-    if (SDL_memcmp(key, "TIT2", 4) == 0) {
-        set_id3v2_string_prop(props, MIX_PROP_METADATA_TITLE_STRING, string, size);
-    } else if (SDL_memcmp(key, "TPE1", 4) == 0) {
-        set_id3v2_string_prop(props, MIX_PROP_METADATA_ARTIST_STRING, string, size);
-    } else if (SDL_memcmp(key, "TALB", 4) == 0) {
-        set_id3v2_string_prop(props, MIX_PROP_METADATA_ALBUM_STRING, string, size);
-    } else if (SDL_memcmp(key, "TCOP", 4) == 0) {
-        set_id3v2_string_prop(props, MIX_PROP_METADATA_COPYRIGHT_STRING, string, size);
+    // put most text things in props in a generic "this is what the id3v2 key was" so apps can handle things we didn't pick out
+    //  specifically, or new tags in the hypothetical future.
+    if (SDL_memcmp(key+1, "XXX", 3) != 0) {   // !!! FIXME: we (currently) skip ?XXX because they aren't simple key/value pairs.
+        char generic_key[64];
+        SDL_snprintf(generic_key, sizeof (generic_key), "SDL_mixer.metadata.id3v2.%c%c%c%c", key[0], key[1], key[2], key[3]);
+        if (key[0] == 'T') {  // all text keys start with 'T'
+            set_id3v2_string_prop(props, generic_key, string, size);
+        } else if (key[0] == 'W') {  // all URLs start with W.
+            char *decoded = parse_id3v1_ansi_string(string, size);
+            if (decoded) {
+                SDL_SetStringProperty(props, generic_key, decoded);
+                SDL_free(decoded);
+            }
+        }
     }
+
 // TODO: Extract "Copyright message" from TXXX value: a KEY=VALUE string divided by a zero byte:*/
 //  else if (SDL_memcmp(key, "TXXX", 4) == 0) {
 //      set_id3v2_string_prop(props, MIX_META_COPYRIGHT, string, size);
 //  }
-
-    // !!! FIXME: other arbitrary keys can go in props now.
 }
 
 // Identify a meta-key and decode the string (Note: input buffer should have at least 4 characters!)
 static void handle_id3v2x2_string(SDL_PropertiesID props, const char *key, const Uint8 *string, size_t size)
 {
-    if (SDL_memcmp(key, "TT2", 3) == 0) {
-        set_id3v2_string_prop(props, MIX_PROP_METADATA_TITLE_STRING, string, size);
-    } else if (SDL_memcmp(key, "TP1", 3) == 0) {
-        set_id3v2_string_prop(props, MIX_PROP_METADATA_ARTIST_STRING, string, size);
-    } else if (SDL_memcmp(key, "TAL", 3) == 0) {
-        set_id3v2_string_prop(props, MIX_PROP_METADATA_ALBUM_STRING, string, size);
-    } else if (SDL_memcmp(key, "TCR", 3) == 0) {
-        set_id3v2_string_prop(props, MIX_PROP_METADATA_COPYRIGHT_STRING, string, size);
+    // put most text things in props in a generic "this is what the id3v2.2 key was" so apps can handle things we didn't pick out
+    //  specifically, or new tags in the hypothetical future.
+    if (SDL_memcmp(key+1, "XX", 2) != 0) {   // !!! FIXME: we (currently) skip ?XX because they aren't simple key/value pairs.
+        char generic_key[64];
+        SDL_snprintf(generic_key, sizeof (generic_key), "SDL_mixer.metadata.id3v2.%c%c%c", key[0], key[1], key[2]);
+        if (key[0] == 'T') {  // all text keys start with 'T'
+            set_id3v2_string_prop(props, generic_key, string, size);
+        } else if (key[0] == 'W') {  // all URLs start with W.
+            char *decoded = parse_id3v1_ansi_string(string, size);
+            if (decoded) {
+                SDL_SetStringProperty(props, generic_key, decoded);
+                SDL_free(decoded);
+            }
+        }
     }
-    // !!! FIXME: other arbitrary keys can go in props now.
 }
 
 // Parse a frame in ID3v2.2 format
@@ -518,7 +529,7 @@ static Uint32 ape_handle_tag(SDL_PropertiesID props, Uint8 *data, size_t valsize
      * However, we only know next sizes:
      * - 4 bytes is a [length] of value field
      * - 4 bytes of value-specific flags
-     * - unknown lenght of a key field. To detect it's size
+     * - unknown length of a key field. To detect its size
      *   it's need to find a zero byte looking at begin of the key field
      * - 1 byte of a null-terminator
      * - [length] bytes a value content
@@ -532,21 +543,36 @@ static Uint32 ape_handle_tag(SDL_PropertiesID props, Uint8 *data, size_t valsize
     const Uint32 key_len = (Uint32)(value - key);
 
     if (valsize > (APE_BUFFER_SIZE - key_len)) {
-        data[APE_BUFFER_SIZE] = '\0';
+        // maybe it's a list? convert embedded null chars to newlines. Note this will mess up binary data, but the APE spec doesn't currently list any binary keys.
+        for (size_t i = 0; i < APE_BUFFER_SIZE; i++) {
+            if (data[i] == '\0') {
+                data[i] = '\n';
+            }
+        }
+        data[APE_BUFFER_SIZE] = '\0';  // null-terminate the data.
     } else {
-        value[valsize] = '\0';
+        // maybe it's a list? convert embedded null chars to newlines. Note this will mess up binary data, but the APE spec doesn't currently list any binary keys.
+        for (size_t i = 0; i < valsize; i++) {
+            if (value[i] == '\0') {
+                value[i] = '\n';
+            }
+        }
+        value[valsize] = '\0';  // null-terminate the data.
     }
 
-    if (SDL_strncasecmp(key, "Title", 6) == 0) {
-        SDL_SetStringProperty(props, MIX_PROP_METADATA_TITLE_STRING, (const char*)(value));
-    } else if (SDL_strncasecmp(key, "Album", 6) == 0) {
-        SDL_SetStringProperty(props, MIX_PROP_METADATA_ALBUM_STRING, (const char*)(value));
-    } else if (SDL_strncasecmp(key, "Artist", 7) == 0) {
-        SDL_SetStringProperty(props, MIX_PROP_METADATA_ARTIST_STRING, (const char*)(value));
-    } else if (SDL_strncasecmp(key, "Copyright", 10) == 0) {
-        SDL_SetStringProperty(props, MIX_PROP_METADATA_COPYRIGHT_STRING, (const char*)(value));
-    } else {
-        // !!! FIXNE: other properties can go into props: https://wiki.hydrogenaud.io/index.php?title=APE_key
+    char apekey[256];
+    if (key_len < sizeof (apekey)) {
+        for (Uint32 i = 0; i < key_len; i++) {
+            apekey[i] = SDL_tolower(key[i]);
+        }
+        apekey[key_len] = '\0';
+        char generic_key[256];
+        const int rc = SDL_snprintf(generic_key, sizeof (generic_key), "SDL_mixer.metadata.ape.%s", apekey);
+        if ((rc > 0) && (rc < sizeof (generic_key))) {
+            if (!SDL_HasProperty(props, generic_key)) {  // in case there are multiple ID3v1 tags appended to a file, we'll take the last one, since we parse backwards from the end of file.
+                SDL_SetStringProperty(props, generic_key, value);
+            }
+        }
     }
 
     return 4 + (Uint32)valsize + key_len;
@@ -854,7 +880,7 @@ static Sint64 get_musicmatch_len(SDL_IOStream *io)
 #define TAG_INVALID    -1
 #define TAG_NOT_FOUND   0
 
-static int probe_id3v1(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, bool tag_handled, int atend, Mix_IoClamp *clamp)
+static int probe_id3v1(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, int atend, Mix_IoClamp *clamp)
 {
     if (SDL_SeekIO(io, -ID3v1_TAG_SIZE, SDL_IO_SEEK_END) == -1) {
         return TAG_INVALID;
@@ -868,9 +894,7 @@ static int probe_id3v1(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, boo
                 return TAG_NOT_FOUND;
             }
         }
-        if (!tag_handled) {
-            parse_id3v1(props, buf);
-        }
+        parse_id3v1(props, buf);
         clamp->length -= ID3v1_TAG_SIZE;
         return TAG_FOUND;
         // FIXME: handle possible double-ID3v1 tags??
@@ -897,7 +921,7 @@ static int probe_mmtag(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, Mix
     return TAG_NOT_FOUND;
 }
 
-static int probe_apetag(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, bool tag_handled, Mix_IoClamp *clamp)
+static int probe_apetag(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, Mix_IoClamp *clamp)
 {
     // APE tag may be at the end: read the footer
     if (SDL_SeekIO(io, -APE_HEADER_SIZE, SDL_IO_SEEK_END) == -1) {
@@ -918,10 +942,10 @@ static int probe_apetag(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, bo
                 return TAG_INVALID;
             } else if (!is_apetag(buf, APE_HEADER_SIZE)) {
                 retval = TAG_NOT_FOUND;
-            } else if (!tag_handled && parse_ape(props, io, SDL_TellIO(io), APE_V2)) {
+            } else if (parse_ape(props, io, SDL_TellIO(io) - APE_HEADER_SIZE, APE_V2)) {
                 retval = TAG_FOUND;
             }
-        } else if (!tag_handled) {
+        } else {
             if (SDL_SeekIO(io, -APE_HEADER_SIZE, SDL_IO_SEEK_END) == -1) {
                 return TAG_INVALID;
             } else if (parse_ape(props, io, SDL_TellIO(io), APE_V1)) {
@@ -977,8 +1001,6 @@ static int probe_lyrics3(SDL_IOStream *io, Uint8 *buf, Mix_IoClamp *clamp)
 bool Mix_ReadMetadataTags(SDL_IOStream *io, SDL_PropertiesID props, Mix_IoClamp *clamp)
 {
     Uint8 buf[TAGS_INPUT_BUFFER_SIZE];
-    int c_id3, c_ape, c_lyr, c_mm;
-    bool tag_handled = false;
 
     /* MP3 standard has no metadata format, so everyone invented
      * their own thing, even with extensions, until ID3v2 became
@@ -1000,7 +1022,7 @@ bool Mix_ReadMetadataTags(SDL_IOStream *io, SDL_PropertiesID props, Mix_IoClamp 
         if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) != 0) {
             return false;
         }
-        tag_handled = parse_id3v2(props, io);
+        parse_id3v2(props, io);
         clamp->start += id3len;
         clamp->length -= id3len;
     }
@@ -1011,45 +1033,69 @@ bool Mix_ReadMetadataTags(SDL_IOStream *io, SDL_PropertiesID props, Mix_IoClamp 
         Uint32 v = 0;
         const Sint64 apelen = get_ape_len(buf, &v);
         if ((v == APE_V1) || (v == APE_V2)) {
-            tag_handled = parse_ape(props, io, 0, v);
+            parse_ape(props, io, 0, v);
         }
         clamp->start += apelen;
         clamp->length -= apelen;
     }
 
-    // it's not impossible that _old_ MusicMatch tag
-    // placing itself after ID3v1.
-    if ((c_mm = probe_mmtag(props, io, buf, clamp)) < 0) {
-        return false;
-    }
-    // ID3v1 tag is at the end
-    if ((c_id3 = probe_id3v1(props, io, buf, tag_handled, !c_mm, clamp)) < 0) {
-        return false;
-    }
-    // we do not know the order of ape or lyrics3 or musicmatch tags, hence the loop here..
-    c_ape = 0;
-    c_lyr = 0;
-    for (;;) {
-        if (!c_lyr) {
-            // care about mp3s with double Lyrics3 tags?
-            if ((c_lyr = probe_lyrics3(io, buf, clamp)) == TAG_INVALID) {
-                return false;
-            }
-            if (c_lyr) continue;
+    // we do not know the order of ape or lyrics3 or musicmatch tags (or if an extra tag was appended after a previous one instead of replacing it), hence the loop here..
+    bool found_any = false;
+    bool found = false;
+    do {
+        found = false;
+        // it's not impossible that _old_ MusicMatch tag
+        // placing itself after ID3v1.
+        if (probe_mmtag(props, io, buf, clamp) == TAG_FOUND) {
+            found = true;
         }
-        if (!c_mm) {
-            if ((c_mm = probe_mmtag(props, io, buf, clamp)) == TAG_INVALID) {
-                return false;
-            }
-            if (c_mm) continue;
+
+        if (probe_id3v1(props, io, buf, !found_any, clamp) == TAG_FOUND) {
+            found = true;
         }
-        if (!c_ape) {
-            if ((c_ape = probe_apetag(props, io, buf, tag_handled, clamp)) == TAG_INVALID) {
-                return false;
-            }
-            if (c_ape) continue;
+
+        if (probe_lyrics3(io, buf, clamp) == TAG_FOUND) {
+            found = true;
         }
-        break;
+
+        if (probe_mmtag(props, io, buf, clamp) == TAG_FOUND) {
+            found = true;
+        }
+
+        if (probe_apetag(props, io, buf, clamp) == TAG_FOUND) {
+            found = true;
+        }
+
+        if (found) {
+            found_any = true;
+        }
+    } while (found);
+
+    // Some tags we turn into standard SDL_mixer metadata keys...
+    // favor them in this order: ID3v2.3+, ID3v2.2, APE, ID3v1 (maybe MusicMatch, eventually).
+    static const char * const title_keys[] = { "SDL_mixer.metadata.id3v2.TIT2", "SDL_mixer.metadata.id3v2.TT2", "SDL_mixer.metadata.ape.title", "SDL_mixer.metadata.id3v1.title" };
+    static const char * const artist_keys[] = { "SDL_mixer.metadata.id3v2.TPE1", "SDL_mixer.metadata.id3v2.TP1", "SDL_mixer.metadata.ape.artist", "SDL_mixer.metadata.id3v1.artist" };
+    static const char * const album_keys[] = { "SDL_mixer.metadata.id3v2.TALB", "SDL_mixer.metadata.id3v2.TAL", "SDL_mixer.metadata.ape.album", "SDL_mixer.metadata.id3v1.album" };
+    static const char * const copyright_keys[] = { "SDL_mixer.metadata.id3v2.TCOP", "SDL_mixer.metadata.id3v2.TCR", "SDL_mixer.metadata.ape.copyright", "SDL_mixer.metadata.id3v1.comment" };
+
+    static const struct { const char *mixer; const char * const * tags; } tagmap_strings[] = {
+        { MIX_PROP_METADATA_TITLE_STRING, title_keys },
+        { MIX_PROP_METADATA_ARTIST_STRING, artist_keys },
+        { MIX_PROP_METADATA_ALBUM_STRING, album_keys},
+        { MIX_PROP_METADATA_COPYRIGHT_STRING, copyright_keys }
+    };
+
+    for (size_t i = 0; i < SDL_arraysize(tagmap_strings); i++) {
+        const char *mixer = tagmap_strings[i].mixer;
+        if (!SDL_HasProperty(props, mixer)) {
+            for (size_t j = 0; j < SDL_arraysize(title_keys); j++) {
+                const char *tag = tagmap_strings[i].tags[j];
+                if (SDL_HasProperty(props, tag)) {
+                    SDL_SetStringProperty(props, mixer, SDL_GetStringProperty(props, tag, NULL));
+                    break;
+                }
+            }
+        }
     }
 
     return true;
