@@ -609,6 +609,7 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
 
     // if this is already raw data, predecoding is just going to make a copy of it, so skip it.
     if (predecode && (decoder->decode != Mix_RAW_decode)) {
+        // !!! FIXME: need a way for a decoder to signal that predecode is forbidden (because it would generate infinite output).
         size_t decoded_len = 0;
         void *decoded = DecodeWholeFile(decoder, audio_userdata, &audio->spec, audio->props, &decoded_len);
         if (!decoded) {

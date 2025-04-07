@@ -64,6 +64,7 @@ extern SDL_DECLSPEC Mix_Audio * SDLCALL Mix_LoadAudioWithProperties(SDL_Properti
 #define MIX_PROP_AUDIO_LOAD_PREDECODE_BOOLEAN "SDL_mixer.audio.load.predecode"
 #define MIX_PROP_AUDIO_DECODER_STRING "SDL_mixer.audio.decoder"
 
+// !!! FIXME: track number?
 #define MIX_PROP_METADATA_TITLE_STRING "SDL_mixer.metadata.title"
 #define MIX_PROP_METADATA_ARTIST_STRING "SDL_mixer.metadata.artist"
 #define MIX_PROP_METADATA_ALBUM_STRING "SDL_mixer.metadata.album"
