@@ -81,6 +81,20 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         return SDL_APP_FAILURE;
     }
 
+
+    SDL_Log("Available decoders:");
+    const int num_decoders = Mix_GetNumAudioDecoders();
+    if (num_decoders < 0) {
+        SDL_Log(" - [error (%s)]", SDL_GetError());
+    } else if (num_decoders == 0) {
+        SDL_Log(" - [none]");
+    } else {
+        for (int i = 0; i < num_decoders; i++) {
+            SDL_Log(" - %s", Mix_GetAudioDecoder(i));
+        }
+    }
+    SDL_Log("%s", "");
+
     const char *audiofname = "sample.mp3";
     Mix_Audio *audio = Mix_LoadAudio(audiofname, false);
     if (!audio) {
@@ -109,6 +123,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     if (!had_metadata) {
         SDL_Log(" - [none]");
     }
+    SDL_Log("%s", "");
 
     track = Mix_CreateTrack();
     Mix_SetTrackAudio(track, audio);
