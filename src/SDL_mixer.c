@@ -203,17 +203,20 @@ static int DecodeMore(Mix_Track *track, void *buffer, int buflen)
         decode_bytes = (decode_bytes / sizeof (float)) * srcfmtsize;
     }
 
+    Uint8 *ptr = (Uint8 *) buffer;
     int retval = 0;
     while (decode_bytes > 0) {
-        const int br = track->input_audio->decoder->decode(track->decoder_userdata, buffer, decode_bytes);
+        const int br = track->input_audio->decoder->decode(track->decoder_userdata, ptr, decode_bytes);
         if (br <= 0) {
             if ((br < 0) && (retval == 0)) {  // if we failed but already got some bytes, return those bytes this time. Otherwise, return an error.
                 retval = -1;
             }
             break;
         }
+
         decode_bytes -= br;
         retval += br;
+        ptr += br;
     }
 
     if ((retval > 0) && (srcfmt != SDL_AUDIO_F32)) {
