@@ -28,6 +28,7 @@ static const Mix_Decoder *decoders[] = {
     &Mix_Decoder_WAV,
     &Mix_Decoder_AIFF,
     &Mix_Decoder_DRMP3,
+    &Mix_Decoder_OGG,
     &Mix_Decoder_SINEWAVE,
     &Mix_Decoder_RAW
 };
