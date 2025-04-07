@@ -63,7 +63,7 @@ static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_
 {
     DRMP3_AudioUserData *payload = (DRMP3_AudioUserData *) SDL_calloc(1, sizeof(*payload));
     if (!payload) {
-        return NULL;
+        return false;
     }
 
     payload->buffer = SDL_LoadFile_IO(io, &payload->buflen, false);
