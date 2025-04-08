@@ -148,6 +148,16 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 {
 //    SDL_RenderClear(renderer);
 //    SDL_RenderPresent(renderer);
+
+    float ratio = ((float) ((((Sint64) SDL_GetTicks()) - 1000) / 1000)) * 0.10f;
+    ratio = SDL_clamp(ratio, 0.1f, 5.0f);
+    static float prev_ratio = 1.0f;
+    if (ratio != prev_ratio) {
+        SDL_Log("new frequency ratio: %f", ratio);
+        Mix_SetTrackFrequencyRatio(track, ratio);
+        prev_ratio = ratio;
+    }
+
     return Mix_Playing(track) ? SDL_APP_CONTINUE : SDL_APP_SUCCESS;
 }
 

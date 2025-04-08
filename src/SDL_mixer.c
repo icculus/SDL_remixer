@@ -1609,6 +1609,40 @@ bool Mix_SetTagGain(const char *tag, float gain)
     return true;;
 }
 
+static bool SetTrackFrequencyRatio(Mix_Track *track, float ratio)
+{
+    // don't have to LockTrack, as SDL_SetAudioStreamFrequencyRatio will do that.
+    //LockTrack(track);
+    const bool retval = SDL_SetAudioStreamFrequencyRatio(track->output_stream, ratio);
+    //UnlockTrack(track);
+    return retval;
+}
+
+bool Mix_SetTrackFrequencyRatio(Mix_Track *track, float ratio)
+{
+    if (!CheckTrackParam(track)) {
+        return false;
+    }
+
+    ratio = SDL_clamp(ratio, 0.01f, 100.0f);   // !!! FIXME: this clamps, but should it fail instead?
+
+    return SetTrackFrequencyRatio(track, ratio);
+}
+
+float Mix_GetTrackFrequencyRatio(Mix_Track *track)
+{
+    if (!CheckTrackParam(track)) {
+        return 1.0f;
+    }
+
+    // don't have to LockTrack, as SDL_GetAudioStreamGain will do that.
+    //LockTrack(track);
+    const float retval = SDL_GetAudioStreamFrequencyRatio(track->output_stream);
+    //UnlockTrack(track);
+
+    return retval;
+}
+
 bool Mix_SetPostMix(SDL_AudioPostmixCallback mix_func, void *userdata)
 {
     if (!CheckInitialized()) {

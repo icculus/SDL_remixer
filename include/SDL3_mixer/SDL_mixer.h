@@ -155,6 +155,11 @@ extern SDL_DECLSPEC float SDLCALL Mix_GetTrackGain(Mix_Track *track);
 extern SDL_DECLSPEC bool SDLCALL Mix_SetTagGain(const char *tag, float gain);  // Change gain for all Mix_Tracks with this tag.
 
 
+// frequency ratio ...
+extern SDL_DECLSPEC bool SDLCALL Mix_SetTrackFrequencyRatio(Mix_Track *track, float ratio);  // speed up or slow down track playback. 1.0f is normal speed, 2.0f is double speed 0.5f is half speed, etc.
+extern SDL_DECLSPEC float SDLCALL Mix_GetTrackFrequencyRatio(Mix_Track *track);
+
+
 // hooks...
 
 typedef void (SDLCALL *Mix_TrackFinishedCallback)(void *userdata, Mix_Track *track);
