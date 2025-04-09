@@ -32,15 +32,43 @@
 #include <vorbis/vorbisfile.h>
 #endif
 
+#ifdef OGG_DYNAMIC
+#define MIX_LOADER_DYNAMIC OGG_DYNAMIC
+#endif
+
+#define MIX_LOADER_FUNCTIONS_vorbisbase \
+    MIX_LOADER_FUNCTION(true,int,ov_clear,(OggVorbis_File *vf)) \
+    MIX_LOADER_FUNCTION(true,vorbis_info *,ov_info,(OggVorbis_File *vf,int link)) \
+    MIX_LOADER_FUNCTION(true,vorbis_comment *,ov_comment,(OggVorbis_File *vf,int link)) \
+    MIX_LOADER_FUNCTION(true,int,ov_test_callbacks,(void *datasource, OggVorbis_File *vf, const char *initial, long ibytes, ov_callbacks callbacks)) \
+    MIX_LOADER_FUNCTION(true,int,ov_open_callbacks,(void *datasource, OggVorbis_File *vf, const char *initial, long ibytes, ov_callbacks callbacks)) \
+    MIX_LOADER_FUNCTION(true,ogg_int64_t,ov_pcm_total,(OggVorbis_File *vf,int i)) \
+    MIX_LOADER_FUNCTION(true,int,ov_pcm_seek,(OggVorbis_File *vf, ogg_int64_t pos)) \
+    MIX_LOADER_FUNCTION(true,int,ov_raw_seek,(OggVorbis_File *vf, ogg_int64_t pos)) \
+    MIX_LOADER_FUNCTION(true,ogg_int64_t,ov_pcm_tell,(OggVorbis_File *vf)) \
+
+#ifdef OGG_USE_TREMOR
+    #define MIX_LOADER_FUNCTIONS \
+        MIX_LOADER_FUNCTIONS_vorbisbase \
+        MIX_LOADER_FUNCTION(true,long,ov_read,(OggVorbis_File *vf,char *buffer,int length, int *bitstream))
+#else
+    #define MIX_LOADER_FUNCTIONS \
+        MIX_LOADER_FUNCTIONS_vorbisbase \
+        MIX_LOADER_FUNCTION(true,long,ov_read_float,(OggVorbis_File *vf, float ***pcm_channels, int samples, int *bitstream))
+#endif
+
+#define MIX_LOADER_MODULE vorbis
+#include "SDL_mixer_loader.h"
+
 
 typedef struct OGG_AudioUserData
 {
     const Uint8 *data;
     size_t datalen;
     bool loop;
-    ogg_int64_t loop_start;
-    ogg_int64_t loop_end;
-    ogg_int64_t loop_len;
+    Sint64 loop_start;
+    Sint64 loop_end;
+    Sint64 loop_len;
 } OGG_AudioUserData;
 
 typedef struct OGG_UserData
@@ -98,7 +126,7 @@ static size_t OGG_IoRead(void *ptr, size_t size, size_t nmemb, void *datasource)
 
 static int OGG_IoSeek(void *datasource, ogg_int64_t offset, int whence)
 {
-    return (SDL_SeekIO((SDL_IOStream*)datasource, offset, whence) < 0)? -1 : 0;
+    return (SDL_SeekIO((SDL_IOStream*)datasource, offset, whence) < 0) ? -1 : 0;
 }
 
 static long OGG_IoTell(void *datasource)
@@ -113,52 +141,6 @@ static int OGG_IoClose(void *datasource)
 }
 
 static const ov_callbacks OGG_IoCallbacks = { OGG_IoRead, OGG_IoSeek, OGG_IoClose, OGG_IoTell };
-
-
-
-static bool IsLoopTag(const char *tag)
-{
-    char buf[5];
-    SDL_strlcpy(buf, tag, 5);
-    return SDL_strcasecmp(buf, "LOOP") == 0;
-}
-
-// Parse time string of the form HH:MM:SS.mmm and return equivalent sample position
-static Sint64 ParseTime(char *time, long samplerate_hz)
-{
-    char *num_start, *p;
-    Sint64 result;
-    char c;
-    int val;
-
-    /* Time is directly expressed as a sample position */
-    if (SDL_strchr(time, ':') == NULL) {
-        return SDL_strtoll(time, NULL, 10);
-    }
-
-    result = 0;
-    num_start = time;
-
-    for (p = time; *p != '\0'; ++p) {
-        if (*p == '.' || *p == ':') {
-            c = *p; *p = '\0';
-            if ((val = SDL_atoi(num_start)) < 0)
-                return -1;
-            result = result * 60 + val;
-            num_start = p + 1;
-            *p = c;
-        }
-
-        if (*p == '.') {
-            double val_f = SDL_atof(p);
-            if (val_f < 0) return -1;
-            return result * samplerate_hz + (Sint64) (val_f * samplerate_hz);
-        }
-    }
-
-    if ((val = SDL_atoi(num_start)) < 0) return -1;
-    return (result * 60 + val) * samplerate_hz;
-}
 
 
 static bool SDLCALL OGG_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
@@ -214,80 +196,18 @@ static bool SDLCALL OGG_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
         return SDL_SetError("Couldn't get Ogg Vorbis info; corrupt data?");
     }
 
-#ifdef OGG_USE_TREMOR
+    #ifdef OGG_USE_TREMOR
     spec->format = SDL_AUDIO_S16;
-#else
+    #else
     spec->format = SDL_AUDIO_F32;
-#endif
+    #endif
 
     spec->channels = vi->channels;
     spec->freq = vi->rate;
 
-    bool is_loop_length = false;
     vorbis_comment *vc = vorbis.ov_comment(&vf, -1);
     if (vc != NULL) {
-        if (vc->vendor && *vc->vendor) {
-            SDL_SetStringProperty(props, "SDL_mixer.metadata.ogg.vendor", vc->vendor);
-        }
-
-        for (int i = 0; i < vc->comments; i++) {
-            char *param = SDL_strdup(vc->user_comments[i]);
-            if (!param) {
-                continue;  // maybe better luck on other comments. But you're probably in big trouble now.
-            }
-
-            char *argument = param;
-            char *value = SDL_strchr(param, '=');
-            if (value == NULL) {
-                value = param + SDL_strlen(param);
-            } else {
-                *(value++) = '\0';
-            }
-
-            /* Want to match LOOP-START, LOOP_START, etc. Remove - or _ from
-             * string if it is present at position 4. */
-            if (IsLoopTag(argument) && ((argument[4] == '_') || (argument[4] == '-'))) {
-                SDL_memmove(argument + 4, argument + 5, SDL_strlen(argument) - 4);
-            }
-
-            char *generic_key = NULL;
-            if (SDL_asprintf(&generic_key, "SDL_mixer.metadata.ogg.%s", argument) > 0) {
-                SDL_SetStringProperty(props, generic_key, value);
-                SDL_free(generic_key);
-            }
-
-            if (SDL_strcasecmp(argument, "LOOPSTART") == 0) {
-                payload->loop_start = ParseTime(value, spec->freq);
-            } else if (SDL_strcasecmp(argument, "LOOPLENGTH") == 0) {
-                payload->loop_len = SDL_strtoll(value, NULL, 10);
-                is_loop_length = true;
-            } else if (SDL_strcasecmp(argument, "LOOPEND") == 0) {
-                payload->loop_end = ParseTime(value, spec->freq);
-                is_loop_length = false;
-            } else if (SDL_strcasecmp(argument, "TITLE") == 0) {
-                SDL_SetStringProperty(props, MIX_PROP_METADATA_TITLE_STRING, value);
-            } else if (SDL_strcasecmp(argument, "ARTIST") == 0) {
-                SDL_SetStringProperty(props, MIX_PROP_METADATA_ARTIST_STRING, value);
-            } else if (SDL_strcasecmp(argument, "ALBUM") == 0) {
-                SDL_SetStringProperty(props, MIX_PROP_METADATA_ALBUM_STRING, value);
-            } else if (SDL_strcasecmp(argument, "COPYRIGHT") == 0) {
-                SDL_SetStringProperty(props, MIX_PROP_METADATA_COPYRIGHT_STRING, value);
-            }
-            SDL_free(param);
-        }
-
-        if (is_loop_length) {
-            payload->loop_end = payload->loop_start + payload->loop_len;
-        } else {
-            payload->loop_len = payload->loop_end - payload->loop_start;
-        }
-
-        /* Ignore invalid loop tag */
-        if (payload->loop_start < 0 || payload->loop_len < 0 || payload->loop_end < 0) {
-            payload->loop_start = 0;
-            payload->loop_len = 0;
-            payload->loop_end = 0;
-        }
+        Mix_ParseOggComments(props, spec->freq, vc->vendor, (const char * const *) vc->user_comments, vc->comments, &payload->loop_start, &payload->loop_end, &payload->loop_len);
     }
 
     vorbis.ov_raw_seek(&vf, 0);  // !!! FIXME: it's not clear if this seek is necessary, but https://stackoverflow.com/a/72482773 suggests it might be, at least on older libvorbisfile releases...

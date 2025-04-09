@@ -122,6 +122,9 @@ extern void SDLCALL Mix_RAW_quit_audio(void *audio_userdata);
 // !!! FIXME: see FIXME in the function's implementation; just ignore return values from this function for now.
 extern bool Mix_ReadMetadataTags(SDL_IOStream *io, SDL_PropertiesID props, Mix_IoClamp *clamp);
 
+// Various Ogg-based decoders use this (Vorbis, FLAC, Opus, etc).
+void Mix_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, const char * const *user_comments, int num_comments, Sint64 *loop_start, Sint64 *loop_end, Sint64 *loop_len);
+
 // these might not all be available, but they are all declared here as if they are.
 extern Mix_Decoder Mix_Decoder_VOC;
 extern Mix_Decoder Mix_Decoder_WAV;
