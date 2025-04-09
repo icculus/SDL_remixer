@@ -95,7 +95,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     }
     SDL_Log("%s", "");
 
-    const char *audiofname = "sample.ogg";
+    const char *audiofname = "sample.opus";
     Mix_Audio *audio = Mix_LoadAudio(audiofname, false);
     if (!audio) {
         SDL_Log("Failed to load audio: %s", SDL_GetError());
