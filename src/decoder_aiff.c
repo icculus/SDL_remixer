@@ -32,6 +32,11 @@
 
 #include "SDL_mixer_internal.h"
 
+// !!! FIXME: there is a "streaming" AIFF decoder in SDL2_mixer, which is tangled up with
+// !!! FIXME: the streaming WAV decoder. It has AIFF-C support, which this one doesn't,
+// !!! FIXME: so in a perfect world we'd at least want to pull that in. But I'm not sure
+// !!! FIXME: there's _any_ demand for AIFF in modern times.
+
 /*********************************************/
 /* Define values for AIFF (IFF audio) format */
 /*********************************************/
