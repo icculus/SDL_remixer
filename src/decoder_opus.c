@@ -102,7 +102,7 @@ static bool set_op_error(const char *function, int error)
     #undef HANDLE_ERROR_CASE
     default: break;
     }
-    return SDL_SetError("%s: unknown error %d\n", function, error);
+    return SDL_SetError("%s: unknown error %d", function, error);
 }
 
 static int OPUS_IoRead(void *datasource, unsigned char *ptr, int size)
@@ -237,37 +237,37 @@ bool SDLCALL OPUS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SD
     return true;
 }
 
-int SDLCALL OPUS_decode(void *userdata, void *buffer, size_t buflen)
+bool SDLCALL OPUS_decode(void *userdata, SDL_AudioStream *stream)
 {
     OPUS_UserData *d = (OPUS_UserData *) userdata;
-    //const OPUS_AudioUserData *payload = d->payload;
     int bitstream = d->current_bitstream;
+    float samples[256];
 
     // !!! FIXME: handle looping.
 
     const int channels = d->current_channels;
-    const int amount = (int)opus.op_read_float(d->of, buffer, buflen / sizeof (float), &bitstream);
+    const int amount = (int)opus.op_read_float(d->of, samples, SDL_arraysize(samples), &bitstream);
     if (amount < 0) {
-        set_op_error("op_read_float", amount);
-        return -1;
+        return set_op_error("op_read_float", amount);
     }
 
-    SDL_assert((amount * sizeof (float) * channels) <= buflen);
-
-    const int retval = amount * sizeof (float) * channels;
+    SDL_assert((amount * channels) <= SDL_arraysize(samples));
 
     if (bitstream != d->current_bitstream) {
         const OpusHead *info = opus.op_head(d->of, -1);
         if (info) {  // this _shouldn't_ be NULL, but if it is, we're just going on without it and hoping the stream format didn't change.
             if (d->current_channels != info->channel_count) {
-                // !!! FIXME: alert higher level that the format changed, so it can adjust the audio stream input format.
+                const SDL_AudioSpec spec = { SDL_AUDIO_F32, info->channel_count, 48000 };
+                SDL_SetAudioStreamFormat(stream, &spec, NULL);
                 d->current_channels = info->channel_count;
             }
         }
         d->current_bitstream = bitstream;
     }
 
-    return retval;
+    SDL_PutAudioStreamData(stream, samples, amount * d->current_channels * sizeof (float));
+
+    return (amount > 0);
 }
 
 bool SDLCALL OPUS_seek(void *userdata, Uint64 frame)

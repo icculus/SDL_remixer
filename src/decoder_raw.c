@@ -106,17 +106,19 @@ bool SDLCALL Mix_RAW_init_track(void *audio_userdata, const SDL_AudioSpec *spec,
     return true;
 }
 
-int SDLCALL Mix_RAW_decode(void *userdata, void *buffer, size_t buflen)
+bool SDLCALL Mix_RAW_decode(void *userdata, SDL_AudioStream *stream)
 {
     RAW_UserData *d = (RAW_UserData *) userdata;
     const RAW_AudioUserData *payload = d->payload;
     const size_t remaining = payload->datalen - d->position;
-    const size_t cpy = SDL_min(buflen, remaining);
-    if (cpy) {
-        SDL_memcpy(buffer, payload->data + d->position, cpy);
-        d->position += cpy;
+    const size_t cpy = SDL_min(4096, remaining);
+    if (!cpy) {
+        return false;  // we're at EOF.
     }
-    return cpy;
+
+    SDL_PutAudioStreamData(stream, payload->data + d->position, cpy);
+    d->position += cpy;
+    return true;
 }
 
 bool SDLCALL Mix_RAW_seek(void *userdata, Uint64 frame)

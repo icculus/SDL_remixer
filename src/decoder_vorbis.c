@@ -61,6 +61,12 @@
 #include "SDL_mixer_loader.h"
 
 
+#ifdef VORBIS_USE_TREMOR
+#define VORBIS_AUDIO_FORMAT SDL_AUDIO_S16
+#else
+#define VORBIS_AUDIO_FORMAT SDL_AUDIO_F32
+#endif
+
 typedef struct VORBIS_AudioUserData
 {
     const Uint8 *data;
@@ -113,7 +119,7 @@ static bool set_ov_error(const char *function, int error)
     #undef HANDLE_ERROR_CASE
     default: break;
     }
-    return SDL_SetError("%s: unknown error %d\n", function, error);
+    return SDL_SetError("%s: unknown error %d", function, error);
 }
 
 static size_t VORBIS_IoRead(void *ptr, size_t size, size_t nmemb, void *datasource)
@@ -196,12 +202,7 @@ static bool SDLCALL VORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
         return SDL_SetError("Couldn't get Ogg Vorbis info; corrupt data?");
     }
 
-    #ifdef VORBIS_USE_TREMOR
-    spec->format = SDL_AUDIO_S16;
-    #else
-    spec->format = SDL_AUDIO_F32;
-    #endif
-
+    spec->format = VORBIS_AUDIO_FORMAT;
     spec->channels = vi->channels;
     spec->freq = vi->rate;
 
@@ -255,7 +256,7 @@ bool SDLCALL VORBIS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, 
     return true;
 }
 
-int SDLCALL VORBIS_decode(void *userdata, void *buffer, size_t buflen)
+bool SDLCALL VORBIS_decode(void *userdata, SDL_AudioStream *stream)
 {
     VORBIS_UserData *d = (VORBIS_UserData *) userdata;
     //const VORBIS_AudioUserData *payload = d->payload;
@@ -264,41 +265,26 @@ int SDLCALL VORBIS_decode(void *userdata, void *buffer, size_t buflen)
     // !!! FIXME: handle looping.
 
 #ifdef VORBIS_USE_TREMOR
-    const int amount = (int)vorbis.ov_read(&d->vf, buffer, buflen, &bitstream);
+    Uint8 samples[256];
+    const int amount = (int)vorbis.ov_read(&d->vf, samples, sizeof (samples), &bitstream);
     if (amount < 0) {
         return set_ov_error("ov_read", amount);
     }
-    const int retval = amount;
 #else
-    const int channels = d->current_channels;
+    float samples[256];
     float **pcm_channels = NULL;
-    const int amount = (int)vorbis.ov_read_float(&d->vf, &pcm_channels, (buflen / sizeof (float)) / channels, &bitstream);
+    const int amount = (int)vorbis.ov_read_float(&d->vf, &pcm_channels, SDL_arraysize(samples), &bitstream);
     if (amount < 0) {
-        set_ov_error("ov_read_float", amount);
-        return -1;
+        return set_ov_error("ov_read_float", amount);
     }
-
-    SDL_assert((amount * sizeof (float) * channels) <= buflen);
-
-    if (channels == 1) {  // one channel, just copy it right through.
-        SDL_memcpy(buffer, pcm_channels[0], amount * sizeof (float));
-    } else {  // multiple channels, we need to interleave them.
-        float *fptr = (float *) buffer;
-        for (int frame = 0; frame < amount; frame++) {
-            for (int channel = 0; channel < channels; channel++) {
-                *(fptr++) = pcm_channels[channel][frame];
-            }
-        }
-    }
-
-    const int retval = amount * sizeof (float) * channels;
 #endif
 
     if (bitstream != d->current_bitstream) {
         const vorbis_info *vi = vorbis.ov_info(&d->vf, -1);
         if (vi) {  // this _shouldn't_ be NULL, but if it is, we're just going on without it and hoping the stream format didn't change.
             if ((d->current_channels != vi->channels) || (d->current_freq != vi->rate)) {
-                // !!! FIXME: alert higher level that the format changed, so it can adjust the audio stream input format.
+                const SDL_AudioSpec spec = { VORBIS_AUDIO_FORMAT, vi->channels, vi->rate };
+                SDL_SetAudioStreamFormat(stream, &spec, NULL);
                 d->current_channels = vi->channels;
                 d->current_freq = vi->rate;
             }
@@ -306,7 +292,36 @@ int SDLCALL VORBIS_decode(void *userdata, void *buffer, size_t buflen)
         d->current_bitstream = bitstream;
     }
 
-    return retval;
+#ifdef VORBIS_USE_TREMOR
+    void *buffer = samples;
+    const int buflen = amount;
+#else
+    void *buffer;
+    int buflen;
+
+    const int channels = d->current_channels;
+
+    SDL_assert((amount * sizeof (float) * channels) <= buflen);
+
+    if (channels == 1) {  // one channel, just copy it right through.
+        buffer = pcm_channels[0];
+        buflen = amount * sizeof (float);
+    } else {  // multiple channels, we need to interleave them.
+        buffer = samples;
+        buflen = (int) (amount * sizeof (float) * channels);
+
+        float *fptr = (float *) samples;
+        for (int frame = 0; frame < amount; frame++) {
+            for (int channel = 0; channel < channels; channel++) {
+                *(fptr++) = pcm_channels[channel][frame];
+            }
+        }
+    }
+#endif
+
+    SDL_PutAudioStreamData(stream, buffer, buflen);
+
+    return (buflen > 0);
 }
 
 bool SDLCALL VORBIS_seek(void *userdata, Uint64 frame)

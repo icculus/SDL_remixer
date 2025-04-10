@@ -141,7 +141,6 @@ static void ApplyFade(Mix_Track *track, float *pcm, int frames)
         return;  // no fade is happening, early exit.
     }
 
-    const int channels = track->input_spec.channels;
     const int to_be_faded = (int) SDL_min(track->fade_frames, frames);
     const int total_fade_frames = (int) track->total_fade_frames;
     int fade_frame_position = total_fade_frames - track->fade_frames;
@@ -150,6 +149,7 @@ static void ApplyFade(Mix_Track *track, float *pcm, int frames)
     const float pctmult = (track->fade_direction < 0) ? 1.0f : -1.0f;
     const float pctsub = (track->fade_direction < 0) ? 1.0f : 0.0f;
     const float ftotal_fade_frames = (float) total_fade_frames;
+    const int channels = track->output_spec.channels;
 
     for (int i = 0; i < to_be_faded; i++) {
         const float pct = (pctsub - (((float) fade_frame_position) / ftotal_fade_frames)) * pctmult;
@@ -183,47 +183,17 @@ static void ApplyFade(Mix_Track *track, float *pcm, int frames)
     }
 }
 
-static void ConvertToFloat(Mix_Track *track, void *buffer, int br)
-{
-    // !!! FIXME: this is a _super_ expensive way to do this. Replace this code!
-    Uint8 *converted = NULL;
-    int converted_len = 0;
-    SDL_ConvertAudioSamples(&track->input_spec, buffer, br, &track->output_spec, &converted, &converted_len);
-    SDL_memcpy(buffer, converted, converted_len);
-    SDL_free(converted);
-}
-
-static int DecodeMore(Mix_Track *track, void *buffer, int buflen)
+static bool DecodeMore(Mix_Track *track, int bytes_needed)
 {
     SDL_assert(track->input_audio != NULL);
-    const SDL_AudioFormat srcfmt = track->input_spec.format;
-    const int srcfmtsize = SDL_AUDIO_BYTESIZE(srcfmt);
-    int decode_bytes = buflen;
 
-    if (srcfmt != SDL_AUDIO_F32) {
-        SDL_assert((srcfmtsize == 1) || (srcfmtsize == 2) || (srcfmtsize == 4));  // so this division works out.
-        decode_bytes = (decode_bytes / sizeof (float)) * srcfmtsize;
-    }
-
-    Uint8 *ptr = (Uint8 *) buffer;
-    int retval = 0;
-    while (decode_bytes > 0) {
-        const int br = track->input_audio->decoder->decode(track->decoder_userdata, ptr, decode_bytes);
-        if (br <= 0) {
-            if ((br < 0) && (retval == 0)) {  // if we failed but already got some bytes, return those bytes this time. Otherwise, return an error.
-                retval = -1;
-            }
+    bool retval = true;
+    while (SDL_GetAudioStreamAvailable(track->input_stream) < bytes_needed) {
+        if (!track->input_audio->decoder->decode(track->decoder_userdata, track->input_stream)) {
+            SDL_FlushAudioStream(track->input_stream);  // make sure we read _everything_ now.
+            retval = false;
             break;
         }
-
-        decode_bytes -= br;
-        retval += br;
-        ptr += br;
-    }
-
-    if ((retval > 0) && (srcfmt != SDL_AUDIO_F32)) {
-        ConvertToFloat(track, buffer, retval);
-        retval = (retval / srcfmtsize) * sizeof (float);
     }
 
     return retval;
@@ -233,7 +203,7 @@ static int FillSilenceFrames(Mix_Track *track, void *buffer, int buflen)
 {
     SDL_assert(track->silence_frames > 0);
     SDL_assert(buflen > 0);
-    const int channels = track->input_spec.channels;
+    const int channels = track->output_spec.channels;
     const int max_silence_bytes = (int) (track->silence_frames * channels * sizeof (float));
     const int br = SDL_min(buflen, max_silence_bytes);
     if (br) {
@@ -274,7 +244,6 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
         track->input_buffer_len = additional_amount;
     }
 
-    const int channels = track->input_spec.channels;
     float *pcm = (float *) track->input_buffer;  // we always work in float32 format.
     int bytes_remaining = additional_amount;
 
@@ -286,17 +255,22 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
 
         if (track->silence_frames > 0) {
             br = FillSilenceFrames(track, pcm, bytes_remaining);
-        } else if (track->input_audio) {
-            br = DecodeMore(track, pcm, bytes_remaining);
         } else if (track->input_stream) {
-            br = SDL_GetAudioStreamData(track->input_stream, pcm, bytes_remaining);
+            if (track->input_audio) {
+                DecodeMore(track, bytes_remaining);
+            }
+            if (br >= 0) {
+                br = SDL_GetAudioStreamData(track->input_stream, pcm, bytes_remaining);
+            }
         }
 
-        // if input_audio and input_stream are both NULL, there's nothing to play (maybe they changed out the input on us?), br will be zero and we'll go to end_of_audio=true.
+            // if input_audio and input_stream are both NULL, there's nothing to play (maybe they changed out the input on us?), br will be zero and we'll go to end_of_audio=true.
 
         if (br <= 0) {  // if 0: EOF. if < 0: decoding/input failure, we're done by default. But maybe it'll loop and play the start again...!
             end_of_audio = true;
         } else {
+            SDL_assert(track->input_stream != NULL);  // should have data bound if you landed here.
+
             // this (probably?) shouldn't be a partial read here. It's either we completely filled the buffer or exhausted the data.
             //  as such, this does mix_callback() as likely the entire buffer, or all we're getting before a finish callback would have to fire,
             //  even if the finish callback would restart the track. As such, the outer loop is mostly here to deal with looping tracks
@@ -314,6 +288,8 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
                 }
             }
 
+            const int channels = track->output_spec.channels;
+
             int frames_read = br / (sizeof (float) * channels);
             if (maxpos >= 0) {
                 const Uint64 newpos = track->position + frames_read;
@@ -324,14 +300,14 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
                 }
             }
 
-            ApplyFade(track, pcm, frames_read);
-
             // give the app a shot at the final buffer before sending it on for mixing
             const int samples = frames_read * channels;
 
             if (track->mix_callback) {
-                track->mix_callback(track->mix_callback_userdata, track, &track->input_spec, pcm, samples);
+                track->mix_callback(track->mix_callback_userdata, track, &track->output_spec, pcm, samples);
             }
+
+            ApplyFade(track, pcm, frames_read);
 
             const int put_bytes = samples * sizeof (float);
             SDL_PutAudioStreamData(stream, pcm, put_bytes);
@@ -354,7 +330,7 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
                 if (track->loops_remaining > 0) {  // negative means infinite loops, so don't decrement for that.
                     track->loops_remaining--;
                 }
-                if (track->input_stream) {  // can't loop on a streaming input, you're done.
+                if (!track->input_audio) {  // can't loop on a streaming input, you're done.
                     track_finished = true;
                 } else {
                     if (!track->input_audio->decoder->seek(track->decoder_userdata, track->loop_start)) {
@@ -499,53 +475,35 @@ static const Mix_Decoder *PrepareDecoder(SDL_IOStream *io, SDL_AudioSpec *spec, 
 
 static void *DecodeWholeFile(const Mix_Decoder *decoder, void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, size_t *decoded_len)
 {
-    void *userdata = NULL;
-    if (!decoder->init_track(audio_userdata, spec, props, &userdata)) {
-        return NULL;
-    }
-
-    // start with the input data length, padded to some block size, and allocate that block size more each time, until we have the whole file.
-    const size_t blocksize = 128 * 1024;
-    size_t allocated_bytes = blocksize;
-    Uint8 *decoded = (Uint8 *) SDL_malloc(allocated_bytes);
-    if (!decoded) {
-        decoder->quit_track(userdata);
-        return NULL;
-    }
-
-    size_t decoded_bytes = 0;
-    while (true) {
-        const int br = decoder->decode(userdata, decoded + decoded_bytes, allocated_bytes - decoded_bytes);
-        if (br == 0) {
-            break;
-        } else if (br < 0) {
-            SDL_free(decoded);
+    size_t bytes_decoded = 0;
+    Uint8 *decoded = NULL;
+    SDL_AudioStream *stream = SDL_CreateAudioStream(spec, spec);   // !!! FIXME: if we're decoding up front, we might as well convert to float here too, right?
+    if (stream) {
+        void *userdata = NULL;
+        if (decoder->init_track(audio_userdata, spec, props, &userdata)) {
+            while (decoder->decode(userdata, stream)) {
+                // spin.
+            }
             decoder->quit_track(userdata);
-            return NULL;
-        } else {
-            decoded_bytes += br;
-            SDL_assert(decoded_bytes <= allocated_bytes);
-            if ((allocated_bytes - decoded_bytes) < blocksize) {
-                void *ptr = SDL_realloc(decoded, allocated_bytes + blocksize);
-                if (!ptr) {
+
+            SDL_FlushAudioStream(stream);
+            const int available = SDL_GetAudioStreamAvailable(stream);
+            decoded = (Uint8 *) SDL_malloc(available);
+            if (decoded) {
+                const int rc = SDL_GetAudioStreamData(stream, decoded, available);
+                SDL_assert((rc < 0) || (rc == available));
+                if (rc < 0) {
                     SDL_free(decoded);
-                    decoder->quit_track(userdata);
-                    return NULL;
+                    decoded = NULL;
+                } else {
+                    bytes_decoded = (size_t) available;
                 }
-                decoded = (Uint8 *) ptr;
-                allocated_bytes += blocksize;
             }
         }
+        SDL_DestroyAudioStream(stream);
     }
 
-    decoder->quit_track(userdata);
-
-    void *ptr = SDL_realloc(decoded, decoded_bytes);  // shrink this down if we can.
-    if (ptr) {
-        decoded = (Uint8 *) ptr;
-    }
-
-    *decoded_len = decoded_bytes;
+    *decoded_len = bytes_decoded;
     return decoded;
 }
 
@@ -866,11 +824,8 @@ Mix_Track *Mix_CreateTrack(void)
     }
 
     // just _something_ so there's a valid input spec until real data is assigned.
-    track->input_spec.format = SDL_AUDIO_F32;
-    track->input_spec.channels = 1;
-    track->input_spec.freq = 48000;
-
-    track->output_stream = SDL_CreateAudioStream(&track->input_spec, NULL);
+    const SDL_AudioSpec spec = { SDL_AUDIO_F32, 1, 48000 };
+    track->output_stream = SDL_CreateAudioStream(&spec, NULL);
     if (!track->output_stream) {
         SDL_DestroyProperties(track->tags);
         SDL_free(track);
@@ -937,6 +892,8 @@ void Mix_DestroyTrack(Mix_Track *track)
         track->input_audio->decoder->quit_track(track->decoder_userdata);
     }
 
+    SDL_DestroyAudioStream(track->internal_stream);
+
     UnrefAudio(track->input_audio);
     SDL_EnumerateProperties(track->tags, UntagWholeTrack, track);
     SDL_DestroyProperties(track->tags);
@@ -964,28 +921,39 @@ bool Mix_SetTrackAudio(Mix_Track *track, Mix_Audio *audio)
         return false;
     }
 
+    SDL_AudioSpec spec;
+    SDL_copyp(&spec, &audio->spec);
+    spec.format = SDL_AUDIO_F32;  // we always work in float32.
+
     LockTrack(track);
+
+    if (track->internal_stream == NULL) {
+        track->internal_stream = SDL_CreateAudioStream(&audio->spec, &spec);
+        if (!track->internal_stream) {
+            UnlockTrack(track);
+            return false;
+        }
+    }
 
     if (track->input_audio) {
         track->input_audio->decoder->quit_track(track->decoder_userdata);
         UnrefAudio(track->input_audio);
     }
 
-    track->input_audio = audio;
+    track->input_audio = NULL;
     track->input_stream = NULL;
-    track->position = 0;
 
     bool retval = true;
     if (audio) {
         retval = audio->decoder->init_track(audio->decoder_userdata, &audio->spec, audio->props, &track->decoder_userdata);
-        if (!retval) {
-            track->input_audio = NULL;
-        } else {
+        if (retval) {
             RefAudio(audio);
-            SDL_copyp(&track->input_spec, &audio->spec);
-            SDL_copyp(&track->output_spec, &audio->spec);
-            track->output_spec.format = SDL_AUDIO_F32;  // we always work in float32.
-            SDL_SetAudioStreamFormat(track->output_stream, &track->output_spec, NULL);
+            SDL_SetAudioStreamFormat(track->internal_stream, &audio->spec, &spec);   // input is from decoded audio, output is to output_stream
+            SDL_SetAudioStreamFormat(track->output_stream, &spec, NULL);   // input is from internal_stream, output is to device, so leave that side NULL for SDL to control.
+            SDL_copyp(&track->output_spec, &spec);
+            track->input_audio = audio;
+            track->input_stream = track->internal_stream;
+            track->position = 0;
         }
     }
 
@@ -1008,10 +976,10 @@ bool Mix_SetTrackAudioStream(Mix_Track *track, SDL_AudioStream *stream)
         track->input_audio = NULL;
     }
 
-    SDL_GetAudioStreamFormat(stream, NULL, &track->input_spec);
-    SDL_copyp(&track->output_spec, &track->input_spec);
+    SDL_GetAudioStreamFormat(stream, &track->output_spec, NULL);
     track->output_spec.format = SDL_AUDIO_F32;  // we always work in float32.
-    SDL_SetAudioStreamFormat(track->output_stream, &track->output_spec, NULL);
+    SDL_SetAudioStreamFormat(stream, NULL, &track->output_spec);                 // input is whatever, output is whatever in float format.
+    SDL_SetAudioStreamFormat(track->output_stream, &track->output_spec, NULL);   // input is whatever in float format, output is whatever the audio device wants.
     track->input_stream = stream;
     track->position = 0;
     UnlockTrack(track);
@@ -1149,10 +1117,12 @@ bool Mix_SetTrackPlaybackPosition(Mix_Track *track, Uint64 frames)
 
     // !!! FIXME: should it be legal to seek past the end of an track (so it just stops immediately, or maybe stops on next callback)?
     LockTrack(track);
-    if (track->input_stream) {  // can't seek a stream that was set up with Mix_SetTrackAudioStream.
-        retval = SDL_SetError("Can't seek a streaming track");
-    } else if (!track->input_audio) {
-        retval = SDL_SetError("No audio currently assigned to this track");
+    if (!track->input_audio) {
+        if (track->input_stream) {  // can't seek a stream that was set up with Mix_SetTrackAudioStream.
+            retval = SDL_SetError("Can't seek a streaming track");
+        } else {
+            retval = SDL_SetError("No audio currently assigned to this track");
+        }
     } else {
         retval = track->input_audio->decoder->seek(track->decoder_userdata, frames);
         if (retval) {
@@ -1190,8 +1160,16 @@ Uint64 Mix_TrackMSToFrames(Mix_Track *track, Uint64 ms)
     Uint64 retval = 0;
     if (CheckTrackParam(track)) {
         LockTrack(track);
-        retval = Mix_MSToFrames(track->input_spec.freq, ms);
+        SDL_AudioSpec spec;
+        if (track->input_stream) {
+            SDL_GetAudioStreamFormat(track->input_stream, &spec, NULL);
+        } else {
+            spec.freq = 0;
+        }
         UnlockTrack(track);
+        if (spec.freq) {
+            retval = Mix_MSToFrames(spec.freq, ms);
+        }
     }
     return retval;
 }
@@ -1201,8 +1179,16 @@ Uint64 Mix_TrackFramesToMS(Mix_Track *track, Uint64 frames)
     Uint64 retval = 0;
     if (CheckTrackParam(track)) {
         LockTrack(track);
-        retval = Mix_FramesToMS(track->input_spec.freq, frames);
+        SDL_AudioSpec spec;
+        if (track->input_stream) {
+            SDL_GetAudioStreamFormat(track->input_stream, &spec, NULL);
+        } else {
+            spec.freq = 0;
+        }
         UnlockTrack(track);
+        if (spec.freq) {
+            retval = Mix_FramesToMS(spec.freq, frames);
+        }
     }
     return retval;
 }
@@ -1234,7 +1220,7 @@ bool Mix_PlayTrack(Mix_Track *track, Sint64 maxFrames, int loops, Sint64 startpo
     LockTrack(track);
     if (!track->input_audio && !track->input_stream) {
         retval = SDL_SetError("No audio currently assigned to this track");
-    } else if (track->input_stream && (startpos != 0)) {
+    } else if (!track->input_audio && (startpos != 0)) {
         retval = SDL_SetError("Playing an input stream (not Mix_Audio) with a non-zero startpos");  // !!! FIXME: should we just read off this many frames right now instead?
     } else if (track->input_audio && (!track->input_audio->decoder->seek(track->decoder_userdata, startpos))) {
         retval = false;

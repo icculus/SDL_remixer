@@ -27,8 +27,7 @@ typedef struct Mix_Decoder
     bool (SDLCALL *init)(void);   // initialize the decoder (load external libraries, etc).
     bool (SDLCALL *init_audio)(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata);  // see if it's a supported format, init spec, set metadata in props, allocate static userdata and payload.
     bool (SDLCALL *init_track)(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata);  // init decoder instance data for a single track.
-// !!! FIXME: decode needs a way to adjust audio spec (say, an Ogg Vorbis file changes sample rate or channels mid-file).
-    int  (SDLCALL *decode)(void *userdata, void *buffer, size_t buflen);
+    bool (SDLCALL *decode)(void *userdata, SDL_AudioStream *stream);
     bool (SDLCALL *seek)(void *userdata, Uint64 frame);
     void (SDLCALL *quit_track)(void *userdata);
     void (SDLCALL *quit_audio)(void *audio_userdata);
@@ -58,9 +57,9 @@ struct Mix_Track
     Uint8 *input_buffer;  // a place to process audio as it progresses through the callback.
     size_t input_buffer_len;  // number of bytes allocated to input_buffer.
     Mix_Audio *input_audio;    // non-NULL if used with Mix_SetTrackAudioStream. Holds a reference.
-    SDL_AudioStream *input_stream;  // non-NULL if used with Mix_SetTrackAudioStream. Not owned by SDL_mixer!
+    SDL_AudioStream *input_stream;  // used for both Mix_SetTrackAudio and Mix_SetTrackAudioStream. Maybe not owned by SDL_mixer!
+    SDL_AudioStream *internal_stream;  // used with Mix_SetTrackAudio, where it is also assigned to input_stream. Owned by SDL_mixer!
     void *decoder_userdata;  // Mix_Decoder-specific data for this run, if any.
-    SDL_AudioSpec input_spec;  // data from input_stream or input_audio is in this format.
     SDL_AudioSpec output_spec;  // processed data we send to SDL is in this format.
     SDL_AudioStream *output_stream;  // the stream that is bound to the audio device.
     Mix_TrackState state;  // playing, paused, stopped.
@@ -113,7 +112,7 @@ extern void *Mix_RAW_InitFromMemoryBuffer(const void *data, const size_t datalen
 
 // decoders that are mostly picking out the raw PCM payload from an uncompressed format can use the RAW decoder for most of their implementation.
 extern bool SDLCALL Mix_RAW_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID metadata_props, void **userdata);
-extern int SDLCALL Mix_RAW_decode(void *userdata, void *buffer, size_t buflen);
+extern bool SDLCALL Mix_RAW_decode(void *userdata, SDL_AudioStream *stream);
 extern bool SDLCALL Mix_RAW_seek(void *userdata, Uint64 frame);
 extern void SDLCALL Mix_RAW_quit_track(void *userdata);
 extern void SDLCALL Mix_RAW_quit_audio(void *audio_userdata);

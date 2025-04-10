@@ -142,12 +142,13 @@ static bool SDLCALL DRMP3_init_track(void *audio_userdata, const SDL_AudioSpec *
     return true;
 }
 
-static int SDLCALL DRMP3_decode(void *userdata, void *buffer, size_t buflen)
+static bool SDLCALL DRMP3_decode(void *userdata, SDL_AudioStream *stream)
 {
     DRMP3_UserData *d = (DRMP3_UserData *) userdata;
-    const size_t framesize = d->payload->framesize;
-    const drmp3_uint64 rc = drmp3_read_pcm_frames_f32(&d->decoder, (buflen / framesize), (float *) buffer);
-    return (int) (size_t) (rc * framesize);
+    float samples[256];
+    const drmp3_uint64 rc = drmp3_read_pcm_frames_f32(&d->decoder, SDL_arraysize(samples), samples);
+    SDL_PutAudioStreamData(stream, samples, rc * d->payload->framesize);
+    return (rc > 0);
 }
 
 static bool SDLCALL DRMP3_seek(void *userdata, Uint64 frame)
