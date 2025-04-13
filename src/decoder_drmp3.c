@@ -71,9 +71,6 @@ static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_
         return false;
     }
 
-    // We keep a drmp3 decoder in its initial state and copy that struct for
-    //  each track, so it doesn't have to do the initial MP3 parsing each time.
-    // They all share the same const payload buffer, seek table, etc.
     drmp3 decoder;
     if (!drmp3_init_memory(&decoder, payload->buffer, payload->buflen, NULL)) {
         SDL_free(payload->buffer);
