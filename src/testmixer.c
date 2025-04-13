@@ -70,7 +70,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
     SDL_SetAppMetadata("Test SDL_mixer", "1.0", "org.libsdl.testmixer");
 
-    if (!SDL_Init(SDL_INIT_VIDEO)) {   // it's safe to SDL_INIT_AUDIO, but SDL_mixer will do it for us.
+    if (argc != 2) {
+        SDL_Log("USAGE: %s <file_to_play>", argv[0]);
+        return SDL_APP_FAILURE;
+    } else if (!SDL_Init(SDL_INIT_VIDEO)) {   // it's safe to SDL_INIT_AUDIO, but SDL_mixer will do it for us.
         SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
         return SDL_APP_FAILURE;
 //    } else if (!SDL_CreateWindowAndRenderer("testmixer", 640, 480, 0, &window, &renderer)) {
@@ -95,7 +98,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     }
     SDL_Log("%s", "");
 
-    const char *audiofname = "sample.wv";
+    const char *audiofname = argv[1];
     Mix_Audio *audio = Mix_LoadAudio(audiofname, false);
     if (!audio) {
         SDL_Log("Failed to load audio: %s", SDL_GetError());
