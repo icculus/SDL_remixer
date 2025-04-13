@@ -91,18 +91,19 @@ static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_
     }
     drmp3_uninit(&decoder);
 
-    DRMP3_AudioUserData *payload = (DRMP3_AudioUserData *) SDL_calloc(1, sizeof(*payload));
-    if (!payload) {
-        return false;
-    }
-
     // suck the whole thing into memory and work out of there from now on.
     if (SDL_SeekIO(io, SDL_IO_SEEK_SET, 0) == -1) {
         return false;
     }
 
+    DRMP3_AudioUserData *payload = (DRMP3_AudioUserData *) SDL_calloc(1, sizeof(*payload));
+    if (!payload) {
+        return false;
+    }
+
     payload->buffer = SDL_LoadFile_IO(io, &payload->buflen, false);
     if (!payload->buffer) {
+        SDL_free(payload);
         return false;
     }
 
