@@ -30,6 +30,7 @@ static const Mix_Decoder *decoders[] = {
     &Mix_Decoder_DRMP3,
     &Mix_Decoder_VORBIS,
     &Mix_Decoder_OPUS,
+    &Mix_Decoder_WAVPACK,
     &Mix_Decoder_SINEWAVE,
     &Mix_Decoder_RAW
 };
@@ -651,7 +652,18 @@ Mix_Audio *Mix_LoadAudio(const char *path, bool predecode)
     }
 
     SDL_IOStream *io = SDL_IOFromFile(path, "rb");
-    return io ? Mix_LoadAudio_IO(io, predecode, true) : NULL;
+    Mix_Audio *retval = NULL;
+    if (io) {
+        const SDL_PropertiesID props = SDL_CreateProperties();
+        SDL_SetStringProperty(props, MIX_PROP_AUDIO_LOAD_PATH_STRING, path);
+        SDL_SetPointerProperty(props, MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER, io);
+        SDL_SetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_PREDECODE_BOOLEAN, predecode);
+        SDL_SetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_CLOSEIO_BOOLEAN, true);
+        retval = Mix_LoadAudioWithProperties(props);
+        SDL_DestroyProperties(props);
+    }
+
+    return retval;
 }
 
 Mix_Audio *Mix_LoadRawAudio_IO(SDL_IOStream *io, const SDL_AudioSpec *spec, bool closeio)

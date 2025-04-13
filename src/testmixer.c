@@ -95,7 +95,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     }
     SDL_Log("%s", "");
 
-    const char *audiofname = "sample.opus";
+    const char *audiofname = "sample.wv";
     Mix_Audio *audio = Mix_LoadAudio(audiofname, false);
     if (!audio) {
         SDL_Log("Failed to load audio: %s", SDL_GetError());
@@ -149,6 +149,7 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 //    SDL_RenderClear(renderer);
 //    SDL_RenderPresent(renderer);
 
+    #if 0
     float ratio = ((float) ((((Sint64) SDL_GetTicks()) - 1000) / 1000)) * 0.10f;
     ratio = SDL_clamp(ratio, 0.1f, 5.0f);
     static float prev_ratio = 1.0f;
@@ -157,6 +158,7 @@ SDL_AppResult SDL_AppIterate(void *appstate)
         Mix_SetTrackFrequencyRatio(track, ratio);
         prev_ratio = ratio;
     }
+    #endif
 
     return Mix_Playing(track) ? SDL_APP_CONTINUE : SDL_APP_SUCCESS;
 }
