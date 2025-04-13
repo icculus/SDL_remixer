@@ -59,10 +59,45 @@ typedef struct DRMP3_UserData
     drmp3 decoder;
 } DRMP3_UserData;
 
+
+// the i/o callbacks are only used for initial open, so it can read as little
+//  as possible to verify it's really an MP3 file. After we're sure it is, we
+//  pull the whole thing into RAM.
+
+static size_t DRMP3_IoRead(void *context, void *buf, size_t size)
+{
+    return SDL_ReadIO((SDL_IOStream *) context, buf, size);
+}
+
+static drmp3_bool32 DRMP3_IoSeek(void *context, int offset, drmp3_seek_origin origin)
+{
+    // SDL_IOWhence and drmp3_seek_origin happen to match up.
+    return (SDL_SeekIO((SDL_IOStream *) context, offset, (SDL_IOWhence) origin) < 0) ? DRMP3_FALSE : DRMP3_TRUE;
+}
+
+static drmp3_bool32 DRMP3_IoTell(void *context, drmp3_int64 *pos)
+{
+    *pos = (drmp3_int64) SDL_TellIO((SDL_IOStream *) context);
+    return (*pos < 0) ? DRMP3_FALSE : DRMP3_TRUE;
+}
+
 static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
+    drmp3 decoder;
+    // do an initial load from the IOStream directly, so it can determine if this is really an MP3 file without
+    //  reading a lot of the stream into memory first.
+    if (!drmp3_init(&decoder, DRMP3_IoRead, DRMP3_IoSeek, DRMP3_IoTell, NULL, io, NULL)) {
+        return false;  // probably not an MP3 file.
+    }
+    drmp3_uninit(&decoder);
+
     DRMP3_AudioUserData *payload = (DRMP3_AudioUserData *) SDL_calloc(1, sizeof(*payload));
     if (!payload) {
+        return false;
+    }
+
+    // suck the whole thing into memory and work out of there from now on.
+    if (SDL_SeekIO(io, SDL_IO_SEEK_SET, 0) == -1) {
         return false;
     }
 
@@ -71,7 +106,6 @@ static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_
         return false;
     }
 
-    drmp3 decoder;
     if (!drmp3_init_memory(&decoder, payload->buffer, payload->buflen, NULL)) {
         SDL_free(payload->buffer);
         SDL_free(payload);
