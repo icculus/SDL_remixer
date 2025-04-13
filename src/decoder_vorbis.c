@@ -301,14 +301,14 @@ bool SDLCALL VORBIS_decode(void *userdata, SDL_AudioStream *stream)
 
     const int channels = d->current_channels;
 
-    SDL_assert((amount * sizeof (float) * channels) <= buflen);
-
     if (channels == 1) {  // one channel, just copy it right through.
-        buffer = pcm_channels[0];
         buflen = amount * sizeof (float);
+        SDL_assert((amount * sizeof (float)) <= buflen);
+        buffer = pcm_channels[0];
     } else {  // multiple channels, we need to interleave them.
-        buffer = samples;
         buflen = (int) (amount * sizeof (float) * channels);
+        SDL_assert((amount * sizeof (float) * channels) <= buflen);
+        buffer = samples;
 
         float *fptr = (float *) samples;
         for (int frame = 0; frame < amount; frame++) {
