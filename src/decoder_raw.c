@@ -43,7 +43,7 @@ void *Mix_RAW_InitFromMemoryBuffer(const void *data, const size_t datalen, const
     // we don't have to inspect the data, we treat anything as valid.
     RAW_AudioUserData *payload = (RAW_AudioUserData *) SDL_malloc(sizeof (*payload));
     if (!payload) {
-        return false;
+        return NULL;
     }
 
     // Clamp data to complete sample frames, just in case.
