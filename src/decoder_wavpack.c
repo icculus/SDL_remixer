@@ -39,7 +39,6 @@
 #define DECODE_FRAMES 4096
 
 #ifndef OPEN_DSD_NATIVE
-#define FLAGS_DSD OPEN_DSD_AS_PCM
 #define OPEN_DSD_NATIVE 0x100
 #define OPEN_DSD_AS_PCM 0x200
 #define WAVPACK4_OR_OLDER
@@ -47,6 +46,21 @@
 
 #ifdef WAVPACK_DYNAMIC
 #define MIX_LOADER_DYNAMIC WAVPACK_DYNAMIC
+#endif
+
+#ifdef WAVPACK4_OR_OLDER
+typedef struct {
+    int32_t (*read_bytes)(void *id, void *data, int32_t bcount);
+    int32_t (*write_bytes)(void *id, void *data, int32_t bcount);
+    int64_t (*get_pos)(void *id);
+    int (*set_pos_abs)(void *id, int64_t pos);
+    int (*set_pos_rel)(void *id, int64_t delta, int mode);
+    int (*push_back_byte)(void *id, int c);
+    int64_t (*get_length)(void *id);
+    int (*can_seek)(void *id);
+    int (*truncate_here)(void *id);
+    int (*close)(void *id);
+} WavpackStreamReader64;
 #endif
 
 #define MIX_LOADER_FUNCTIONS \
@@ -73,21 +87,6 @@
 
 
 // i/o callbacks ...
-
-#ifdef WAVPACK4_OR_OLDER
-typedef struct {
-    int32_t (*read_bytes)(void *id, void *data, int32_t bcount);
-    int32_t (*write_bytes)(void *id, void *data, int32_t bcount);
-    int64_t (*get_pos)(void *id);
-    int (*set_pos_abs)(void *id, int64_t pos);
-    int (*set_pos_rel)(void *id, int64_t delta, int mode);
-    int (*push_back_byte)(void *id, int c);
-    int64_t (*get_length)(void *id);
-    int (*can_seek)(void *id);
-    int (*truncate_here)(void *id);
-    int (*close)(void *id);
-} WavpackStreamReader64;
-#endif
 
 static int32_t WAVPACK_IoReadBytes(void *id, void *data, int32_t bcount)
 {
