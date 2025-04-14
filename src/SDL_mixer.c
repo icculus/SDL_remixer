@@ -261,12 +261,10 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
             if (track->input_audio) {
                 DecodeMore(track, bytes_remaining);
             }
-            if (br >= 0) {
-                br = SDL_GetAudioStreamData(track->input_stream, pcm, bytes_remaining);
-            }
+            br = SDL_GetAudioStreamData(track->input_stream, pcm, bytes_remaining);
         }
 
-            // if input_audio and input_stream are both NULL, there's nothing to play (maybe they changed out the input on us?), br will be zero and we'll go to end_of_audio=true.
+        // if input_audio and input_stream are both NULL, there's nothing to play (maybe they changed out the input on us?), br will be zero and we'll go to end_of_audio=true.
 
         if (br <= 0) {  // if 0: EOF. if < 0: decoding/input failure, we're done by default. But maybe it'll loop and play the start again...!
             end_of_audio = true;
