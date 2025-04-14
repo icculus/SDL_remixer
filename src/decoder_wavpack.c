@@ -284,6 +284,7 @@ typedef struct WAVPACK_AudioUserData
     int channels;
     int mode;
     int decimation;
+    SDL_AudioFormat format;
 } WAVPACK_AudioUserData;
 
 typedef struct WAVPACK_UserData
@@ -426,21 +427,22 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
     }
     #endif
 
+    // library returns the samples in 8, 16, 24, or 32 bit depth, but
+    // always in an int32_t[] buffer, in signed host-endian format.
+    switch (payload->bps) {
+        case 8: payload->format = SDL_AUDIO_S8; break;
+        case 16: payload->format = SDL_AUDIO_S16; break;
+        case 32: payload->format = (payload->mode & MODE_FLOAT) ? SDL_AUDIO_F32 : SDL_AUDIO_S32; break;
+        default: SDL_SetError("Unsupported WavPack bitdepth"); goto failed;  // uhoh.
+    }
+
+    spec->format = payload->format;
     spec->freq = (int) payload->samplerate / payload->decimation;
     spec->channels = payload->channels;
 
-    // library returns the samples in 8, 16, 24, or 32 bit depth, but
-    // always in an int32_t[] buffer, in signed host-endian format.
-    if (payload->bps == 8) {
-        spec->format = SDL_AUDIO_S8;
-    } else if (payload->bps == 16) {
-        spec->format = SDL_AUDIO_S16;
-    } else {
-        spec->format = (payload->mode & MODE_FLOAT) ? SDL_AUDIO_F32 : SDL_AUDIO_S32;
-    }
-
     #if WAVPACK_DBG
     SDL_Log("WavPack loader:");
+    SDL_Log(" correction data: %s", wvcio ? "yes" : "no");
     SDL_Log(" numsamples: %" SDL_PRIs64, (Sint64)payload->numsamples);
     SDL_Log(" samplerate: %d", spec->freq);
     SDL_Log(" bitspersample: %d", payload->bps);
@@ -465,7 +467,7 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
     return true;
 
 failed:
-    SDL_assert(ctx == NULL);
+    if (ctx) { wavpack.WavpackCloseFile(ctx); }
     SDL_CloseIO(wvcio);
     SDL_CloseIO(io);
     SDL_free(wvcdata);
@@ -544,14 +546,35 @@ bool SDLCALL WAVPACK_decode(void *userdata, SDL_AudioStream *stream)
         return false;  // EOF.
     }
 
-    if (payload->bps == 24) {
-        int32_t *src = (int32_t *) d->decode_buffer;
+    amount *= payload->channels;  // move from sample frames to samples.
+
+    // library returns the samples in 8, 16, 24, or 32 bit depth, but
+    // always in an int32_t[] buffer, in signed host-endian format.
+    const SDL_AudioFormat format = payload->format;
+    if (format == SDL_AUDIO_S8) {
+        const Sint32 *src = (const Sint32 *) d->decode_buffer;
+        Sint8 *dst = (Sint8 *) d->decode_buffer;
         for (int i = 0; i < amount; i++) {
-            src[i] <<= 8;
+            dst[i] = (Sint8) src[i];  // data is 8-bit audio in an int32 array, shrink out unused bits in-place.
         }
+    } else if (format == SDL_AUDIO_S16) {
+        const Sint32 *src = (const Sint32 *) d->decode_buffer;
+        Sint16 *dst = (Sint16 *) d->decode_buffer;
+        for (int i = 0; i < amount; i++) {
+            dst[i] = (Sint16) src[i];  // data is 16-bit audio in an int32 array, shrink out unused bits in-place.
+        }
+    } else if (payload->bps == 24) {
+        SDL_assert(format == SDL_AUDIO_S32);
+        const Sint32 *src = (const Sint32 *) d->decode_buffer;
+        Sint32 *dst = (Sint32 *) d->decode_buffer;
+        for (int i = 0; i < amount; i++) {
+            dst[i] = src[i] << 8;  // data is 24-bit audio in an int32 array, slide bits over so most significant bits scale up to full 32-bit range.
+        }
+    } else {
+        SDL_assert((format == SDL_AUDIO_F32) || (format == SDL_AUDIO_S32));  // these just copy through as-is.
     }
 
-    SDL_PutAudioStreamData(stream, d->decode_buffer, amount * payload->channels * (payload->bps / 8));
+    SDL_PutAudioStreamData(stream, d->decode_buffer, amount * SDL_AUDIO_BYTESIZE(payload->format));
     return true;
 }
 
