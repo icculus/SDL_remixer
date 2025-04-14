@@ -25,7 +25,7 @@
 
 #define WAVPACK_DBG 0
 
-/* This file supports WavPack music streams */
+// This file supports WavPack music streams
 
 #if defined(WAVPACK_HEADER)
 #include WAVPACK_HEADER
@@ -34,7 +34,7 @@
 #else
 #include <wavpack/wavpack.h>
 #endif
-#include <stdio.h>  /* SEEK_SET, ... */
+#include <stdio.h>  // SEEK_SET, ...
 
 #define DECODE_FRAMES 4096
 
@@ -105,7 +105,7 @@ static int64_t WAVPACK_IoGetPos64(void *id)
 
 static int WAVPACK_IoSetPosRel64(void *id, int64_t delta, int mode)
 {
-    switch (mode) { /* just in case SDL_IO doesn't match stdio.. */
+    switch (mode) { // just in case SDL_IO doesn't match stdio..
         case SEEK_SET: mode = SDL_IO_SEEK_SET; break;
         case SEEK_CUR: mode = SDL_IO_SEEK_CUR; break;
         case SEEK_END: mode = SDL_IO_SEEK_END; break;
@@ -132,7 +132,7 @@ static int WAVPACK_IoSetPosAbs32(void *id, uint32_t pos)
 static int WAVPACK_IoPushbackByte(void *id, int c)
 {
     (void)c;
-    /* libwavpack calls ungetc(), but doesn't really modify buffer. */
+    // libwavpack calls ungetc(), but doesn't really modify buffer.
     return (SDL_SeekIO((SDL_IOStream*)id, -1, SDL_IO_SEEK_CUR) < 0) ? -1 : 0;
 }
 
@@ -159,20 +159,20 @@ static WavpackStreamReader WAVPACK_IoReader32 = {
     WAVPACK_IoPushbackByte,
     WAVPACK_IoGetLength32,
     WAVPACK_IoCanSeek,
-    NULL  /* write_bytes */
+    NULL  // write_bytes
 };
 
 static WavpackStreamReader64 WAVPACK_IoReader64 = {
     WAVPACK_IoReadBytes,
-    NULL, /* write_bytes */
+    NULL, // write_bytes
     WAVPACK_IoGetPos64,
     WAVPACK_IoSetPosAbs64,
     WAVPACK_IoSetPosRel64,
     WAVPACK_IoPushbackByte,
     WAVPACK_IoGetLength64,
     WAVPACK_IoCanSeek,
-    NULL, /* truncate_here */
-    NULL  /* close */
+    NULL, // truncate_here
+    NULL  // close
 };
 
 
@@ -182,9 +182,9 @@ static WavpackStreamReader64 WAVPACK_IoReader64 = {
 #undef FLAGS_DSD
 #define FLAGS_DSD OPEN_DSD_AS_PCM
 
-/* Decimation code for playing DSD (which comes from the library already decimated 8x) */
-/* Code provided by David Bryant. */
-/* sinc low-pass filter, cutoff = fs/12, 80 terms */
+// Decimation code for playing DSD (which comes from the library already decimated 8x)
+// Code provided by David Bryant.
+// sinc low-pass filter, cutoff = fs/12, 80 terms
 #define NUM_TERMS 80
 static const int32_t filter[NUM_TERMS] = {
          50,     464,     968,     711,   -1203,   -5028,   -9818,  -13376,
@@ -220,7 +220,7 @@ static void *decimation_init(int num_channels, int ratio)
     return sp;
 }
 
-/** FIXME: This isn't particularly easy on the CPU ! **/
+// FIXME: This isn't particularly easy on the CPU !
 static int decimation_run(void *context, int32_t *samples, int num_samples)
 {
     ChanState *sp = (ChanState *)context;
@@ -269,7 +269,7 @@ static void decimation_reset(void *context)
         sp[i].ratio = ratio;
     }
 }
-#endif /* MUSIC_WAVPACK_DSD */
+#endif // MUSIC_WAVPACK_DSD
 
 
 typedef struct WAVPACK_AudioUserData
