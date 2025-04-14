@@ -129,6 +129,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     SDL_Log("%s", "");
 
     track = Mix_CreateTrack();
+    //const int chmap[] = { 1, 0 }; Mix_SetTrackOutputChannelMap(track, chmap, SDL_arraysize(chmap));
     Mix_SetTrackAudio(track, audio);
     Mix_PlayTrack(track, Mix_TrackMSToFrames(track, 9440), 3, 0, Mix_TrackMSToFrames(track, 6097), Mix_TrackMSToFrames(track, 30000), Mix_TrackMSToFrames(track, 3000));
 //Sint64 maxFrames, int loops, Sint64 startpos, Sint64 loop_start, Sint64 fadeIn, Sint64 append_silence_frames);

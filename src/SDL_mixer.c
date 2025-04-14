@@ -1634,9 +1634,23 @@ float Mix_GetTrackFrequencyRatio(Mix_Track *track)
         return 1.0f;
     }
 
-    // don't have to LockTrack, as SDL_GetAudioStreamGain will do that.
+    // don't have to LockTrack, as SDL_GetAudioStreamFrequencyRatio will do that.
     //LockTrack(track);
     const float retval = SDL_GetAudioStreamFrequencyRatio(track->output_stream);
+    //UnlockTrack(track);
+
+    return retval;
+}
+
+bool Mix_SetTrackOutputChannelMap(Mix_Track *track, const int *chmap, int count)
+{
+    if (!CheckTrackParam(track)) {
+        return false;
+    }
+
+    // don't have to LockTrack, as SDL_SetAudioStreamOutputChannelMap will do that.
+    //LockTrack(track);
+    const bool retval = SDL_SetAudioStreamOutputChannelMap(track->output_stream, chmap, count);
     //UnlockTrack(track);
 
     return retval;

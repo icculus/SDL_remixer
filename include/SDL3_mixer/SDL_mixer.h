@@ -160,6 +160,10 @@ extern SDL_DECLSPEC bool SDLCALL Mix_SetTrackFrequencyRatio(Mix_Track *track, fl
 extern SDL_DECLSPEC float SDLCALL Mix_GetTrackFrequencyRatio(Mix_Track *track);
 
 
+// channel maps...
+extern SDL_DECLSPEC bool SDLCALL Mix_SetTrackOutputChannelMap(Mix_Track *track, const int *chmap, int count);
+
+
 // hooks...
 
 typedef void (SDLCALL *Mix_TrackFinishedCallback)(void *userdata, Mix_Track *track);
