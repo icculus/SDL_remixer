@@ -432,6 +432,7 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
     switch (payload->bps) {
         case 8: payload->format = SDL_AUDIO_S8; break;
         case 16: payload->format = SDL_AUDIO_S16; break;
+        case 24: payload->format = SDL_AUDIO_S32; break;
         case 32: payload->format = (payload->mode & MODE_FLOAT) ? SDL_AUDIO_F32 : SDL_AUDIO_S32; break;
         default: SDL_SetError("Unsupported WavPack bitdepth"); goto failed;  // uhoh.
     }
