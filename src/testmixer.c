@@ -79,7 +79,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 //    } else if (!SDL_CreateWindowAndRenderer("testmixer", 640, 480, 0, &window, &renderer)) {
 //        SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
 //        return SDL_APP_FAILURE;
-    } else if (!Mix_OpenAudio(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, NULL)) {
+    } else if (!Mix_OpenMixer(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, NULL)) {
         SDL_Log("Couldn't create mixer: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
@@ -170,6 +170,6 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
 {
     // SDL will clean up the window/renderer for us.
     // SDL_mixer will clean up the tracks and audio.
-    Mix_CloseAudio();
+    Mix_CloseMixer();
 }
 

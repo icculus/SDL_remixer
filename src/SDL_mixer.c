@@ -371,7 +371,7 @@ static void QuitDecoders(void)
     num_available_decoders = 0;
 }
 
-bool Mix_OpenAudio(SDL_AudioDeviceID devid, const SDL_AudioSpec *spec)
+bool Mix_OpenMixer(SDL_AudioDeviceID devid, const SDL_AudioSpec *spec)
 {
     if (CheckInitialized()) {
         return SDL_SetError("Audio is already open");
@@ -404,7 +404,7 @@ bool Mix_OpenAudio(SDL_AudioDeviceID devid, const SDL_AudioSpec *spec)
     return true;
 }
 
-void Mix_CloseAudio(void)
+void Mix_CloseMixer(void)
 {
     if (audio_device) {
         Mix_HaltAllTracks(0);

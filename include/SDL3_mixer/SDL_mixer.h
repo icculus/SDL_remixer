@@ -46,8 +46,8 @@ typedef struct Mix_Track Mix_Track;
 // there is no separate "init" function. You open the audio device (presumably just the default audio device) and go.
 
 // spec is optional, can be used as a hint as to how most your audio will be formatted. We will still accept any format, and passing a NULL spec is valid.
-extern SDL_DECLSPEC bool SDLCALL Mix_OpenAudio(SDL_AudioDeviceID devid, const SDL_AudioSpec *spec);  // this will call SDL_Init(SDL_INIT_AUDIO), open audio device.
-extern SDL_DECLSPEC void SDLCALL Mix_CloseAudio(void);  // this will call SDL_QuitSubSystem(SDL_INIT_AUDIO).
+extern SDL_DECLSPEC bool SDLCALL Mix_OpenMixer(SDL_AudioDeviceID devid, const SDL_AudioSpec *spec);  // this will call SDL_Init(SDL_INIT_AUDIO), open audio device.
+extern SDL_DECLSPEC void SDLCALL Mix_CloseMixer(void);  // this will call SDL_QuitSubSystem(SDL_INIT_AUDIO).
 
 extern SDL_DECLSPEC int SDLCALL Mix_GetNumAudioDecoders(void);
 extern SDL_DECLSPEC const char * SDLCALL Mix_GetAudioDecoder(int index);  // "WAV", "MP3", etc.
