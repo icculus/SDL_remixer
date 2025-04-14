@@ -95,6 +95,9 @@ struct Mix_Track
 #define MIX_PROP_DECODER_WAVPACK_WVC_PATH_STRING "SDL_mixer.decoder.wavpack.wvc_path"
 #define MIX_PROP_AUDIO_LOAD_PATH_STRING "SDL_mixer.audio.load.path"
 
+#define MIX_DURATION_UNKNOWN -1
+#define MIX_DURATION_INFINITE -2
+
 // Clamp an IOStream to a subset of its available data...this is used to cut ID3 (etc) tags off
 //  both ends of an audio file, making it look like the file just doesn't have those bytes.
 

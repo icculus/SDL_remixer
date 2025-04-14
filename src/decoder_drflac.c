@@ -168,11 +168,11 @@ static bool SDLCALL DRFLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
     spec->channels = (int) decoder->channels;
     spec->freq = (int) decoder->sampleRate;
 
-    *duration_frames = (decoder->totalPCMFrameCount == 0) ? -1 : (Sint64) decoder->totalPCMFrameCount;
+    *duration_frames = (decoder->totalPCMFrameCount == 0) ? MIX_DURATION_UNKNOWN : (Sint64) decoder->totalPCMFrameCount;
 
     payload->loop = ((payload->loop_end > 0) && (payload->loop_end <= *duration_frames) && (payload->loop_start < payload->loop_end));
     if (payload->loop) {
-        *duration_frames = - 1;  // if looping, stream is infinite.
+        *duration_frames = MIX_DURATION_INFINITE;  // if looping, stream is infinite.
     }
 
     drflac_close(decoder);

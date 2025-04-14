@@ -62,7 +62,7 @@ static bool SDLCALL SINEWAVE_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, S
     payload->amplitude = famp;
     payload->sample_rate = spec->freq;
 
-    *duration_frames = -1;  // it's infinite.
+    *duration_frames = MIX_DURATION_INFINITE;
     *audio_userdata = payload;
     return true;
 }

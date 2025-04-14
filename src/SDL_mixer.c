@@ -520,7 +520,7 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
     const Mix_Decoder *decoder = NULL;
     SDL_IOStream *io = NULL;
     Mix_IoClamp clamp;
-    Sint64 duration_frames = -1;
+    Sint64 duration_frames = MIX_DURATION_UNKNOWN;
 
     Mix_Audio *audio = (Mix_Audio *) SDL_calloc(1, sizeof (*audio));
     if (!audio) {
@@ -568,8 +568,7 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
     SDL_SetStringProperty(audio->props, MIX_PROP_AUDIO_DECODER_STRING, decoder->name);
 
     // if this is already raw data, predecoding is just going to make a copy of it, so skip it.
-    if (predecode && (decoder->decode != Mix_RAW_decode)) {
-        // !!! FIXME: need a way for a decoder to signal that predecode is forbidden (because it would generate infinite output).
+    if (predecode && (decoder->decode != Mix_RAW_decode) && (duration_frames != MIX_DURATION_INFINITE)) {
         size_t decoded_len = 0;
         void *decoded = DecodeWholeFile(decoder, audio_userdata, &audio->spec, audio->props, &decoded_len);
         if (!decoded) {
@@ -590,6 +589,8 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
 
     if (duration_frames >= 0) {
         SDL_SetNumberProperty(audio->props, MIX_PROP_METADATA_DURATION_FRAMES_NUMBER, duration_frames);
+    } else if (duration_frames == MIX_DURATION_INFINITE) {
+        SDL_SetBooleanProperty(audio->props, MIX_PROP_METADATA_DURATION_INFINITE_BOOLEAN, true);
     }
 
     SDL_AtomicIncRef(&audio->refcount);
@@ -709,7 +710,7 @@ Mix_Audio *Mix_LoadRawAudio(const void *data, size_t datalen, const SDL_AudioSpe
 
     SDL_SetStringProperty(audio->props, MIX_PROP_AUDIO_DECODER_STRING, "RAW");
 
-    Sint64 duration_frames = -1;
+    Sint64 duration_frames = MIX_DURATION_UNKNOWN;
     audio->decoder_userdata = Mix_RAW_InitFromMemoryBuffer(data, datalen, spec, &duration_frames, free_when_done);
     if (!audio->decoder_userdata) {
         SDL_DestroyProperties(audio->props);

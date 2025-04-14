@@ -71,7 +71,7 @@ extern SDL_DECLSPEC Mix_Audio * SDLCALL Mix_LoadAudioWithProperties(SDL_Properti
 #define MIX_PROP_METADATA_COPYRIGHT_STRING "SDL_mixer.metadata.copyright"
 #define MIX_PROP_METADATA_TRACKNUM_NUMBER "SDL_mixer.metadata.tracknum"
 #define MIX_PROP_METADATA_DURATION_FRAMES_NUMBER "SDL_mixer.metadata.duration_frames"  // this is in sample frames and might be off by a little if the decoder only knew it by time. Unset if unknown.
-
+#define MIX_PROP_METADATA_DURATION_INFINITE_BOOLEAN "SDL_mixer.metadata.duration_infinite"   // if true, audio never runs out of audio to generate. This isn't necessarily always known to SDL_mixer itself, though.
 
 // Load raw PCM data to a Mix_Audio from an IOStream.
 extern SDL_DECLSPEC Mix_Audio * SDLCALL Mix_LoadRawAudio_IO(SDL_IOStream *io, const SDL_AudioSpec *spec, bool closeio);

@@ -198,7 +198,7 @@ static bool SDLCALL OPUS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
     opus.op_free(of);  // done with this instance. Tracks will maintain their own OggVorbis_File object.
     SDL_CloseIO(io);  // close our memory i/o.
 
-    *duration_frames = payload->loop ? -1 : full_length;  // if looping, stream is infinite.
+    *duration_frames = payload->loop ? MIX_DURATION_INFINITE : full_length;  // if looping, stream is infinite.
     *audio_userdata = payload;
 
     return true;
