@@ -456,6 +456,10 @@ bool Mix_GetDeviceSpec(SDL_AudioSpec *spec)
 static const Mix_Decoder *PrepareDecoder(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
     const char *decoder_name = SDL_GetStringProperty(props, MIX_PROP_AUDIO_DECODER_STRING, NULL);
+
+    SDL_AudioSpec original_spec;
+    SDL_copyp(&original_spec, spec);
+
     for (int i = 0; i < num_available_decoders; i++) {
         const Mix_Decoder *decoder = available_decoders[i];
         if (!decoder_name || (SDL_strcasecmp(decoder->name, decoder_name) == 0)) {
@@ -465,7 +469,7 @@ static const Mix_Decoder *PrepareDecoder(SDL_IOStream *io, SDL_AudioSpec *spec, 
                 SDL_SetError("Can't seek in stream to find proper decoder");
                 return NULL;
             }
-            SDL_zerop(spec);  // make this zero again, in case init_audio changed it and then failed.
+            SDL_copyp(spec, &original_spec);  // reset this, in case init_audio changed it and then failed.
         }
     }
 
