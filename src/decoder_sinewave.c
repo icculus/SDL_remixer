@@ -43,15 +43,14 @@ static bool SDLCALL SINEWAVE_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, S
 
     const Sint64 si64hz = SDL_GetNumberProperty(props, MIX_PROP_DECODER_SINEWAVE_HZ_NUMBER, -1);
     const float famp = SDL_GetFloatProperty(props, MIX_PROP_DECODER_SINEWAVE_AMPLITUDE_FLOAT, -1.0f);
-    const Sint64 si64freq = SDL_GetNumberProperty(props, MIX_PROP_DECODER_SINEWAVE_SAMPLE_RATE_NUMBER, -1);
 
-    if ((si64hz <= 0) || (famp <= 0.0f) || (si64freq <= 0)) {
+    if ((si64hz <= 0) || (famp <= 0.0f)) {
         return false;
     }
 
     spec->format = SDL_AUDIO_F32;
     spec->channels = 1;
-    spec->freq = (int) si64freq;
+    // we use the existing spec->freq to match the device sample rate, avoiding unnecessary resampling.
 
     SINEWAVE_AudioUserData *payload = (SINEWAVE_AudioUserData *) SDL_malloc(sizeof (*payload));
     if (!payload) {

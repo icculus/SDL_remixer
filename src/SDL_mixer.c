@@ -548,6 +548,15 @@ Mix_Audio *Mix_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
         Mix_ReadMetadataTags(io, audio->props, &clamp);
     }
 
+    // the decoder sets audio->spec to whatever it's actually providing, but we pass the current hardware setting in, in case that's useful for
+    // things that generate audio in whatever format (for example, a MIDI decoder is going to generate PCM from "notes", so it can do it at any
+    // sample rate, so it might as well do it at device format to avoid an unnecessary resample later).
+    if (!Mix_GetDeviceSpec(&audio->spec)) {
+        audio->spec.channels = 2;   // eh, just set a reasonable default...
+        audio->spec.freq = 44100;
+    }
+    audio->spec.format = SDL_AUDIO_F32;  // we always want to favor float32 for our own purposes, regardless of the hardware settings.
+
     decoder = PrepareDecoder(io, &audio->spec, audio->props, &duration_frames, &audio_userdata);
     if (!decoder) {
         goto failed;
@@ -748,11 +757,6 @@ Mix_Audio *Mix_CreateSineWaveAudio(int hz, float amplitude)
         return NULL;
     }
 
-    SDL_AudioSpec device_spec;
-    if (!Mix_GetDeviceSpec(&device_spec)) {
-        return NULL;
-    }
-
     const SDL_PropertiesID props = SDL_CreateProperties();
     if (!props) {
         return NULL;
@@ -761,7 +765,6 @@ Mix_Audio *Mix_CreateSineWaveAudio(int hz, float amplitude)
     SDL_SetStringProperty(props, MIX_PROP_AUDIO_DECODER_STRING, "SINEWAVE");
     SDL_SetNumberProperty(props, MIX_PROP_DECODER_SINEWAVE_HZ_NUMBER, hz);
     SDL_SetFloatProperty(props, MIX_PROP_DECODER_SINEWAVE_AMPLITUDE_FLOAT, amplitude);
-    SDL_SetNumberProperty(props, MIX_PROP_DECODER_SINEWAVE_SAMPLE_RATE_NUMBER, device_spec.freq);
     Mix_Audio *audio = Mix_LoadAudioWithProperties(props);
     SDL_DestroyProperties(props);
     return audio;
