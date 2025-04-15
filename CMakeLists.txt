@@ -13,6 +13,7 @@ add_library(SDL_remixer STATIC
     src/decoder_aiff.c
     src/decoder_drflac.c
     src/decoder_drmp3.c
+    src/decoder_fluidsynth.c
     src/decoder_opus.c
     src/decoder_raw.c
     src/decoder_sinewave.c
@@ -29,6 +30,7 @@ target_include_directories(SDL_remixer PRIVATE ${OPUS_INCLUDE_DIRS})
 target_compile_definitions(SDL_remixer PRIVATE VORBIS_DYNAMIC="libvorbisfile.so.3")
 target_compile_definitions(SDL_remixer PRIVATE OPUS_DYNAMIC="libopusfile.so.0")
 target_compile_definitions(SDL_remixer PRIVATE WAVPACK_DYNAMIC="libwavpack.so.1")
+target_compile_definitions(SDL_remixer PRIVATE FLUIDSYNTH_DYNAMIC="libfluidsynth.so.3")
 
 
 

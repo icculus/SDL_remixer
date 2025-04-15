@@ -92,6 +92,8 @@ struct Mix_Track
 #define MIX_PROP_DECODER_SINEWAVE_AMPLITUDE_FLOAT "SDL_mixer.decoder.sinewave.amplitude"
 #define MIX_PROP_DECODER_WAVPACK_WVC_IOSTREAM_POINTER "SDL_mixer.decoder.wavpack.wvc_iostream"
 #define MIX_PROP_DECODER_WAVPACK_WVC_PATH_STRING "SDL_mixer.decoder.wavpack.wvc_path"
+#define MIX_PROP_DECODER_FLUIDSYNTH_SOUNDFONT_IOSTREAM_POINTER "SDL_mixer.decoder.fluidsynth.soundfont_iostream"
+#define MIX_PROP_DECODER_FLUIDSYNTH_SOUNDFONT_PATH_STRING "SDL_mixer.decoder.fluidsynth.soundfont_path"
 #define MIX_PROP_AUDIO_LOAD_PATH_STRING "SDL_mixer.audio.load.path"
 
 #define MIX_DURATION_UNKNOWN -1
@@ -136,6 +138,7 @@ extern Mix_Decoder Mix_Decoder_DRMP3;
 extern Mix_Decoder Mix_Decoder_VORBIS;
 extern Mix_Decoder Mix_Decoder_OPUS;
 extern Mix_Decoder Mix_Decoder_DRFLAC;
+extern Mix_Decoder Mix_Decoder_FLUIDSYNTH;
 extern Mix_Decoder Mix_Decoder_WAVPACK;
 extern Mix_Decoder Mix_Decoder_SINEWAVE;
 extern Mix_Decoder Mix_Decoder_RAW;
