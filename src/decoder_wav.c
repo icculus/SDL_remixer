@@ -26,7 +26,8 @@ static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
     Uint8 *buffer = NULL;
     Uint32 buflen = 0;
 
-    // this is obviously wrong.
+    // in theory, a compressed .wav (ADPCM, etc) could be better to stream per-track, but these are probably rare in general,
+    //  and this way centralizes _all_ the work in SDL, where it's more likely to receive fixes and improvements.
     if (!SDL_LoadWAV_IO(io, false, spec, &buffer, &buflen)) {
         return false;
     }
@@ -35,6 +36,37 @@ static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
     if (!*audio_userdata) {
         SDL_free(buffer);
         return false;
+    }
+
+    // let's take a moment to try and pull WAV-specific metadata out, if we can. If this fails, we don't care.
+    if (SDL_SeekIO(io, 12, SDL_IO_SEEK_SET) == 12) {   // skip RIFF and WAVE headers. We should be at the first chunk now.
+        const Uint32 ID3_ = 0x20334449;  // "ID3 "
+        const Uint32 id3_ = 0x20336469;  // "id3 "
+
+        Uint32 chunk = 0;
+        while (SDL_ReadU32LE(io, &chunk)) {
+            Uint32 chunklen = 0;
+            if (!SDL_ReadU32LE(io, &chunklen)) {
+                break;
+            }
+
+            const Uint32 nextchunkpos = SDL_TellIO(io) + chunklen;
+
+            if ((chunk == ID3_) || (chunk == id3_)) {
+                Mix_IoClamp clamp;
+                SDL_IOStream *clamped_io = Mix_OpenIoClamp(&clamp, io);
+                if (clamped_io) {
+                    clamp.length = chunklen;
+                    Mix_ReadMetadataTags(clamped_io, props, &clamp);
+                    SDL_CloseIO(clamped_io);
+                }
+                break;
+            }
+
+            if (SDL_SeekIO(io, nextchunkpos, SDL_IO_SEEK_SET) < 0) {
+                break;
+            }
+        }
     }
 
     return true;
