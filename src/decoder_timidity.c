@@ -29,9 +29,9 @@
 //  to be added to the search path. The library adds the path
 //  of the config file to its search path, too.
 #if defined(SDL_PLATFORM_WIN32)
-static const char const *timidity_cfgs[] = { "C:\\TIMIDITY\\TIMIDITY.CFG" };
+static const char *timidity_cfgs[] = { "C:\\TIMIDITY\\TIMIDITY.CFG" };
 #else  // unix:
-static const char const *timidity_cfgs[] = { "/etc/timidity.cfg", "/etc/timidity/timidity.cfg", "/etc/timidity/freepats.cfg" };
+static const char *timidity_cfgs[] = { "/etc/timidity.cfg", "/etc/timidity/timidity.cfg", "/etc/timidity/freepats.cfg" };
 #endif
 
 typedef struct TIMIDITY_AudioUserData
