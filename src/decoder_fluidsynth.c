@@ -103,8 +103,6 @@ static void SDLCALL FLUIDSYNTH_quit(void)
 
 static bool SDLCALL FLUIDSYNTH_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
-    //SDL_SetStringProperty(props, MIX_PROP_DECODER_FLUIDSYNTH_SOUNDFONT_PATH_STRING, "GeneralUser-GS.sf2");
-
     // Try to load a soundfont file if we can.
     //  If the app provided an IOStream for it, use it. If not, see if they provided a path.
     bool closesfio = false;
@@ -119,6 +117,14 @@ static bool SDLCALL FLUIDSYNTH_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec,
             sfio = SDL_IOFromFile(sfpath, "rb");
         }
     }
+
+    #ifdef SDL_PLATFORM_UNIX  // this happens to be where Ubuntu stores a usable soundfont, at least on my laptop. Try it if nothing else worked out.
+    if (!sfio) {
+        sfio = SDL_IOFromFile("/usr/share/sounds/sf2/default-GM.sf2", "rb");
+    }
+    #endif
+
+    // !!! FIXME: should we fail if there's no soundfont? It's not going to generate sound without one, unless there's a system-provided one in some cases...?
 
     // just load the bare minimum from the IOStream to verify it's a MIDI file.
     char magic[4];
