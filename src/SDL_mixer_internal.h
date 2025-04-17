@@ -138,6 +138,7 @@ extern Mix_Decoder Mix_Decoder_DRMP3;
 extern Mix_Decoder Mix_Decoder_VORBIS;
 extern Mix_Decoder Mix_Decoder_OPUS;
 extern Mix_Decoder Mix_Decoder_DRFLAC;
+extern Mix_Decoder Mix_Decoder_TIMIDITY;
 extern Mix_Decoder Mix_Decoder_FLUIDSYNTH;
 extern Mix_Decoder Mix_Decoder_WAVPACK;
 extern Mix_Decoder Mix_Decoder_SINEWAVE;

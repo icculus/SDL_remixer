@@ -10,6 +10,15 @@ pkg_check_modules(OPUS REQUIRED opus)
 
 # Yes I know it says STATIC.
 add_library(SDL_remixer STATIC
+    src/timidity/common.c
+    src/timidity/instrum.c
+    src/timidity/mix.c
+    src/timidity/output.c
+    src/timidity/playmidi.c
+    src/timidity/readmidi.c
+    src/timidity/resample.c
+    src/timidity/tables.c
+    src/timidity/timidity.c
     src/decoder_aiff.c
     src/decoder_drflac.c
     src/decoder_drmp3.c
@@ -21,6 +30,7 @@ add_library(SDL_remixer STATIC
     src/decoder_vorbis.c
     src/decoder_wav.c
     src/decoder_wavpack.c
+    src/decoder_timidity.c
     src/SDL_mixer.c
     src/SDL_mixer_metadata_tags.c
 )
