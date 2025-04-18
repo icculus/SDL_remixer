@@ -6,7 +6,10 @@ project(SDL_remixer LANGUAGES C)
 
 find_package(SDL3 REQUIRED)
 find_package(PkgConfig REQUIRED)
+pkg_check_modules(FLUIDSYNTH REQUIRED fluidsynth)
 pkg_check_modules(OPUS REQUIRED opus)
+pkg_check_modules(VORBISFILE REQUIRED vorbisfile)
+pkg_check_modules(WAVPACK REQUIRED wavpack)
 
 # Yes I know it says STATIC.
 add_library(SDL_remixer STATIC
@@ -41,7 +44,10 @@ else()
 endif()
 target_link_libraries(SDL_remixer PRIVATE SDL3::Headers)
 target_include_directories(SDL_remixer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(SDL_remixer PRIVATE ${FLUIDSYNTH_INCLUDE_DIRS})
 target_include_directories(SDL_remixer PRIVATE ${OPUS_INCLUDE_DIRS})
+target_include_directories(SDL_remixer PRIVATE ${VORBISFILE_INCLUDE_DIRS})
+target_include_directories(SDL_remixer PRIVATE ${WAVPACK_INCLUDE_DIRS})
 target_compile_definitions(SDL_remixer PRIVATE VORBIS_DYNAMIC="libvorbisfile.so.3")
 target_compile_definitions(SDL_remixer PRIVATE OPUS_DYNAMIC="libopusfile.so.0")
 target_compile_definitions(SDL_remixer PRIVATE WAVPACK_DYNAMIC="libwavpack.so.1")
