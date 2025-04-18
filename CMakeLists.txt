@@ -2,7 +2,7 @@
 # CMake and throw most of this away, when we get to that point.
 
 cmake_minimum_required(VERSION 3.12.0)
-project(SDL_remixer)
+project(SDL_remixer LANGUAGES C)
 
 find_package(SDL3 REQUIRED)
 find_package(PkgConfig REQUIRED)
