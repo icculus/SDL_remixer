@@ -34,6 +34,11 @@ add_library(SDL_remixer STATIC
     src/SDL_mixer.c
     src/SDL_mixer_metadata_tags.c
 )
+if ("c_std_99" IN_LIST CMAKE_C_COMPILE_FEATURES)
+    target_compile_features(SDL_remixer PRIVATE c_std_99)
+else()
+    message(WARNING "target_compile_features does not know c_std_99 for C compiler")
+endif()
 target_link_libraries(SDL_remixer PRIVATE SDL3::Headers)
 target_include_directories(SDL_remixer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(SDL_remixer PRIVATE ${OPUS_INCLUDE_DIRS})
@@ -44,6 +49,9 @@ target_compile_definitions(SDL_remixer PRIVATE FLUIDSYNTH_DYNAMIC="libfluidsynth
 
 
 add_executable(testmixer src/testmixer.c)
+if ("c_std_99" IN_LIST CMAKE_C_COMPILE_FEATURES)
+    target_compile_features(testmixer PRIVATE c_std_99)
+endif()
 target_link_libraries(testmixer PRIVATE SDL_remixer)
 target_link_libraries(testmixer PRIVATE SDL3::SDL3)
 target_include_directories(testmixer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
