@@ -34,7 +34,7 @@ add_library(SDL_remixer STATIC
     src/SDL_mixer.c
     src/SDL_mixer_metadata_tags.c
 )
-target_include_directories(SDL_remixer PRIVATE ${SDL3_INCLUDE_DIRS})
+target_link_libraries(SDL_remixer PRIVATE SDL3::Headers)
 target_include_directories(SDL_remixer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(SDL_remixer PRIVATE ${OPUS_INCLUDE_DIRS})
 target_compile_definitions(SDL_remixer PRIVATE VORBIS_DYNAMIC="libvorbisfile.so.3")
@@ -43,9 +43,8 @@ target_compile_definitions(SDL_remixer PRIVATE WAVPACK_DYNAMIC="libwavpack.so.1"
 target_compile_definitions(SDL_remixer PRIVATE FLUIDSYNTH_DYNAMIC="libfluidsynth.so.3")
 
 
-
 add_executable(testmixer src/testmixer.c)
 target_link_libraries(testmixer PRIVATE SDL_remixer)
-target_link_libraries(testmixer PRIVATE ${SDL3_LIBRARIES})
+target_link_libraries(testmixer PRIVATE SDL3::SDL3)
 target_include_directories(testmixer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(testmixer PRIVATE ${SDL3_INCLUDE_DIRS})
