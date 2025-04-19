@@ -409,6 +409,7 @@ bool SDLCALL FLAC_seek(void *userdata, Uint64 frame)
         }
         return SDL_SetError("Seeking of FLAC stream failed: libFLAC seek failed.");
     }
+    return true;
 }
 
 void SDLCALL FLAC_quit_track(void *userdata)
