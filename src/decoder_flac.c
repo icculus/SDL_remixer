@@ -227,7 +227,7 @@ static void FLAC_IoMetadata(const FLAC__StreamDecoder *decoder, const FLAC__Stre
             for (int i = 0; i < num_comments; i++) {
             	comments[i] = (char *) vc->comments[i].entry;
             }
-            Mix_ParseOggComments(payload->props, d->spec.freq, vc->vendor_string.entry, (const char * const *) comments, num_comments, &payload->loop_start, &payload->loop_end, &payload->loop_len);
+            Mix_ParseOggComments(payload->props, d->spec.freq, (const char *) vc->vendor_string.entry, (const char * const *) comments, num_comments, &payload->loop_start, &payload->loop_end, &payload->loop_len);
             SDL_free(comments);
         }
     }
