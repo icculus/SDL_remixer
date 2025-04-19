@@ -30,6 +30,7 @@ static const Mix_Decoder *decoders[] = {
     &Mix_Decoder_DRMP3,
     &Mix_Decoder_VORBIS,
     &Mix_Decoder_OPUS,
+    &Mix_Decoder_FLAC,
     &Mix_Decoder_DRFLAC,
     &Mix_Decoder_TIMIDITY,
     &Mix_Decoder_FLUIDSYNTH,
