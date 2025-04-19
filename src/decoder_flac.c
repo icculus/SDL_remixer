@@ -216,9 +216,17 @@ static void FLAC_IoMetadata(const FLAC__StreamDecoder *decoder, const FLAC__Stre
 
     if (metadata->type == FLAC__METADATA_TYPE_STREAMINFO) {
         d->spec.freq = metadata->data.stream_info.sample_rate;
-        d->spec.channels = metadata->data.stream_info.channels;
-        d->spec.format = SDL_AUDIO_S32;
+        d->spec.channels = metadata->data.stream_info.channels;   // (if we need the 3-channel map magic, it'll notice spec.channels is wrong when we get to FLAC_IoWrite and set it up.)
         d->bits_per_sample = (int) metadata->data.stream_info.bits_per_sample;
+
+        // decoded FLAC data is always int, from 4 to 32 bits, apparently.
+        if (d->bits_per_sample <= 8) {
+            d->spec.format = SDL_AUDIO_S8;
+        } else if (d->bits_per_sample <= 16) {
+            d->spec.format = SDL_AUDIO_S16;
+        } else if (d->bits_per_sample <= 32) {
+            d->spec.format = SDL_AUDIO_S32;
+        }
     } else if (metadata->type == FLAC__METADATA_TYPE_VORBIS_COMMENT) {
         const FLAC__StreamMetadata_VorbisComment *vc = &metadata->data.vorbis_comment;
         const int num_comments = (int) vc->num_comments;
