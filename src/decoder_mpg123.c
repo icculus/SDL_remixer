@@ -80,11 +80,19 @@ typedef struct MPG123_UserData
 
 static bool SDLCALL MPG123_init(void)
 {
-    return LoadModule_mpg123();
+    if (LoadModule_mpg123()) {
+        mpg123.mpg123_init();
+        return true;
+    }
+
+    return false;
 }
 
 static void SDLCALL MPG123_quit(void)
 {
+    if (mpg123.mpg123_exit) {
+        mpg123.mpg123_exit();
+    }
     UnloadModule_mpg123();
 }
 
