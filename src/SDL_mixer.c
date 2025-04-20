@@ -35,6 +35,7 @@ static const Mix_Decoder *decoders[] = {
     &Mix_Decoder_TIMIDITY,
     &Mix_Decoder_FLUIDSYNTH,
     &Mix_Decoder_WAVPACK,
+    &Mix_Decoder_GME,
     &Mix_Decoder_SINEWAVE,
     &Mix_Decoder_RAW
 };

@@ -142,6 +142,7 @@ extern Mix_Decoder Mix_Decoder_DRFLAC;
 extern Mix_Decoder Mix_Decoder_TIMIDITY;
 extern Mix_Decoder Mix_Decoder_FLUIDSYNTH;
 extern Mix_Decoder Mix_Decoder_WAVPACK;
+extern Mix_Decoder Mix_Decoder_GME;
 extern Mix_Decoder Mix_Decoder_SINEWAVE;
 extern Mix_Decoder Mix_Decoder_RAW;
 
