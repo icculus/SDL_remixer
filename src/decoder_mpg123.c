@@ -21,9 +21,15 @@
 
 #include "SDL_mixer_internal.h"
 
+#define MPG123_NO_LARGENAME /* disable the _FILE_OFFSET_BITS suffixes. */
 #include <stdio.h>  // SEEK_SET
 #include <mpg123.h>
 
+#ifdef _MSC_VER
+#define Mpg123SSizeType ptrdiff_t
+#else
+#define Mpg123SSizeType ssize_t
+#endif
 #if (MPG123_API_VERSION >= 45) /* api (but not abi) change as of mpg123-1.26.0 */
 #define Mpg123OutMemoryType void *
 #else
@@ -47,7 +53,7 @@
     MIX_LOADER_FUNCTION(true,const char*,mpg123_plain_strerror,(int errcode)) \
     MIX_LOADER_FUNCTION(true,void,mpg123_rates,(const long **list, size_t *number)) \
     MIX_LOADER_FUNCTION(true,int,mpg123_read,(mpg123_handle *mh, Mpg123OutMemoryType outmemory, size_t outmemsize, size_t *done)) \
-    MIX_LOADER_FUNCTION(true,int,mpg123_replace_reader_handle,(mpg123_handle *mh, mpg123_ssize_t (*r_read) (void *, void *, size_t), off_t (*r_lseek)(void *, off_t, int), void (*cleanup)(void*))) \
+    MIX_LOADER_FUNCTION(true,int,mpg123_replace_reader_handle,(mpg123_handle *mh, Mpg123SSizeType (*r_read) (void *, void *, size_t), off_t (*r_lseek)(void *, off_t, int), void (*cleanup)(void*))) \
     MIX_LOADER_FUNCTION(true,int,mpg123_scan,(mpg123_handle *mh)) \
     MIX_LOADER_FUNCTION(true,off_t,mpg123_seek,(mpg123_handle *mh, off_t sampleoff, int whence)) \
     MIX_LOADER_FUNCTION(true,off_t,mpg123_tell,(mpg123_handle *mh)) \
@@ -82,10 +88,10 @@ static void SDLCALL MPG123_quit(void)
     UnloadModule_mpg123();
 }
 
-static mpg123_ssize_t MPG123_IoRead(void *p, void *dst, size_t n)
+static Mpg123SSizeType MPG123_IoRead(void *p, void *dst, size_t n)
 {
     SDL_IOStream *io = (SDL_IOStream *) p;
-    const mpg123_ssize_t r = (mpg123_ssize_t) SDL_ReadIO(io, dst, n);
+    const Mpg123SSizeType r = (Mpg123SSizeType) SDL_ReadIO(io, dst, n);
     if (!r && (SDL_GetIOStatus(io) != SDL_IO_STATUS_EOF)) {
         return -1;
     }
