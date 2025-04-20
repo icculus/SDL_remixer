@@ -149,7 +149,7 @@ static bool SDLCALL OPUS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
         return false;
     }
 
-    OPUS_AudioUserData *payload = (OPUS_AudioUserData *) SDL_calloc(1, sizeof *payload);
+    OPUS_AudioUserData *payload = (OPUS_AudioUserData *) SDL_calloc(1, sizeof (*payload));
     if (!payload) {
         SDL_free(data);
         return false;

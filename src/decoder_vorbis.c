@@ -168,7 +168,7 @@ static bool SDLCALL VORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
         return false;
     }
 
-    VORBIS_AudioUserData *payload = (VORBIS_AudioUserData *) SDL_calloc(1, sizeof *payload);
+    VORBIS_AudioUserData *payload = (VORBIS_AudioUserData *) SDL_calloc(1, sizeof (*payload));
     if (!payload) {
         SDL_free(data);
         return false;

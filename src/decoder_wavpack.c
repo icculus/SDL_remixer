@@ -383,7 +383,7 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
     }
 
     WavpackContext *ctx = NULL;
-    WAVPACK_AudioUserData *payload = (WAVPACK_AudioUserData *) SDL_calloc(1, sizeof *payload);
+    WAVPACK_AudioUserData *payload = (WAVPACK_AudioUserData *) SDL_calloc(1, sizeof (*payload));
     if (!payload) {
         goto failed;
     }
