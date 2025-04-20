@@ -134,6 +134,7 @@ void Mix_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, 
 extern Mix_Decoder Mix_Decoder_VOC;
 extern Mix_Decoder Mix_Decoder_WAV;
 extern Mix_Decoder Mix_Decoder_AIFF;
+extern Mix_Decoder Mix_Decoder_MPG123;
 extern Mix_Decoder Mix_Decoder_DRMP3;
 extern Mix_Decoder Mix_Decoder_VORBIS;
 extern Mix_Decoder Mix_Decoder_OPUS;

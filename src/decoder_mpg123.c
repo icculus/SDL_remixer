@@ -1,0 +1,398 @@
+/*
+  SDL_mixer:  An audio mixer library based on the SDL library
+  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
+
+  This software is provided 'as-is', without any express or implied
+  warranty.  In no event will the authors be held liable for any damages
+  arising from the use of this software.
+
+  Permission is granted to anyone to use this software for any purpose,
+  including commercial applications, and to alter it and redistribute it
+  freely, subject to the following restrictions:
+
+  1. The origin of this software must not be misrepresented; you must not
+     claim that you wrote the original software. If you use this software
+     in a product, an acknowledmpg123nt in the product documentation would be
+     appreciated but is not required.
+  2. Altered source versions must be plainly marked as such, and must not be
+     misrepresented as being the original software.
+  3. This notice may not be removed or altered from any source distribution.
+*/
+
+#include "SDL_mixer_internal.h"
+
+#include <stdio.h>  // SEEK_SET
+#include <mpg123.h>
+
+#if (MPG123_API_VERSION >= 45) /* api (but not abi) change as of mpg123-1.26.0 */
+#define Mpg123OutMemoryType void *
+#else
+#define Mpg123OutMemoryType unsigned char *
+#endif
+
+#ifdef MPG123_DYNAMIC
+#define MIX_LOADER_DYNAMIC MPG123_DYNAMIC
+#endif
+
+#define MIX_LOADER_FUNCTIONS \
+    MIX_LOADER_FUNCTION(true,int,mpg123_close,(mpg123_handle *mh)) \
+    MIX_LOADER_FUNCTION(true,void,mpg123_delete,(mpg123_handle *mh)) \
+    MIX_LOADER_FUNCTION(true,void,mpg123_exit,(void)) \
+    MIX_LOADER_FUNCTION(true,int,mpg123_format,(mpg123_handle *mh, long rate, int channels, int encodings)) \
+    MIX_LOADER_FUNCTION(true,int,mpg123_format_none,(mpg123_handle *mh)) \
+    MIX_LOADER_FUNCTION(true,int,mpg123_getformat,(mpg123_handle *mh, long *rate, int *channels, int *encoding)) \
+    MIX_LOADER_FUNCTION(true,int,mpg123_init,(void)) \
+    MIX_LOADER_FUNCTION(true,mpg123_handle*,mpg123_new,(const char* decoder, int *error)) \
+    MIX_LOADER_FUNCTION(true,int,mpg123_open_handle,(mpg123_handle *mh, void *iohandle)) \
+    MIX_LOADER_FUNCTION(true,const char*,mpg123_plain_strerror,(int errcode)) \
+    MIX_LOADER_FUNCTION(true,void,mpg123_rates,(const long **list, size_t *number)) \
+    MIX_LOADER_FUNCTION(true,int,mpg123_read,(mpg123_handle *mh, Mpg123OutMemoryType outmemory, size_t outmemsize, size_t *done)) \
+    MIX_LOADER_FUNCTION(true,int,mpg123_replace_reader_handle,(mpg123_handle *mh, mpg123_ssize_t (*r_read) (void *, void *, size_t), off_t (*r_lseek)(void *, off_t, int), void (*cleanup)(void*))) \
+    MIX_LOADER_FUNCTION(true,int,mpg123_scan,(mpg123_handle *mh)) \
+    MIX_LOADER_FUNCTION(true,off_t,mpg123_seek,(mpg123_handle *mh, off_t sampleoff, int whence)) \
+    MIX_LOADER_FUNCTION(true,off_t,mpg123_tell,(mpg123_handle *mh)) \
+    MIX_LOADER_FUNCTION(true,off_t,mpg123_length,(mpg123_handle *mh)) \
+    MIX_LOADER_FUNCTION(true,const char*,mpg123_strerror,(mpg123_handle *mh)) \
+
+#define MIX_LOADER_MODULE mpg123
+#include "SDL_mixer_loader.h"
+
+
+typedef struct MPG123_AudioUserData
+{
+    const Uint8 *data;
+    size_t datalen;
+} MPG123_AudioUserData;
+
+typedef struct MPG123_UserData
+{
+    const MPG123_AudioUserData *payload;
+    SDL_IOStream *io;
+    mpg123_handle *handle;
+} MPG123_UserData;
+
+
+static bool SDLCALL MPG123_init(void)
+{
+    return LoadModule_mpg123();
+}
+
+static void SDLCALL MPG123_quit(void)
+{
+    UnloadModule_mpg123();
+}
+
+static mpg123_ssize_t MPG123_IoRead(void *p, void *dst, size_t n)
+{
+    SDL_IOStream *io = (SDL_IOStream *) p;
+    const mpg123_ssize_t r = (mpg123_ssize_t) SDL_ReadIO(io, dst, n);
+    if (!r && (SDL_GetIOStatus(io) != SDL_IO_STATUS_EOF)) {
+        return -1;
+    }
+    return r < 0 ? -1 : r;
+}
+
+static off_t MPG123_IoSeek(void *p, off_t offset, int whence)
+{
+    return (off_t)SDL_SeekIO((SDL_IOStream *)p, (Sint64)offset, whence);
+}
+
+static void MPG123_IoClose(void *p)
+{
+    (void)p;  // do nothing, we will free the file later
+}
+
+static SDL_AudioFormat FormatMPG123ToSDL(int fmt)
+{
+    switch (fmt) {
+        case MPG123_ENC_SIGNED_8: return SDL_AUDIO_S8;
+        case MPG123_ENC_UNSIGNED_8: return SDL_AUDIO_U8;
+        case MPG123_ENC_SIGNED_16: return SDL_AUDIO_S16;
+        case MPG123_ENC_SIGNED_32: return SDL_AUDIO_S32;
+        case MPG123_ENC_FLOAT_32: return SDL_AUDIO_F32;
+        default: break;
+    }
+    return SDL_AUDIO_UNKNOWN;
+}
+
+/*#define DEBUG_MPG123*/
+#ifdef DEBUG_MPG123
+static const char *MPG123FormatString(int fmt)
+{
+    switch (fmt) {
+#define f(x) case x: return #x;
+        f(MPG123_ENC_UNSIGNED_8)
+        f(MPG123_ENC_SIGNED_8)
+        f(MPG123_ENC_SIGNED_16)
+        f(MPG123_ENC_SIGNED_32)
+        f(MPG123_ENC_FLOAT_32)
+#undef f
+    }
+    return "unknown";
+}
+#endif
+
+static const char *mpg_err(mpg123_handle* mpg, int result)
+{
+    const char *err = "unknown error";
+
+    if (mpg && result == MPG123_ERR) {
+        err = mpg123.mpg123_strerror(mpg);
+    } else {
+        err = mpg123.mpg123_plain_strerror(result);
+    }
+    return err;
+}
+
+
+static bool SDLCALL MPG123_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
+{
+    MPG123_AudioUserData *payload = NULL;
+    const long *rates = NULL;
+    size_t num_rates = 0;
+    size_t datalen = 0;
+    Uint8 *data = NULL;
+    int encoding = 0;
+    long rate = 0;
+    int result = 0;
+
+    mpg123_handle *handle = mpg123.mpg123_new(NULL, &result);
+    if (result != MPG123_OK) {
+        return SDL_SetError("mpg123_new failed");
+    }
+
+    result = mpg123.mpg123_replace_reader_handle(handle, MPG123_IoRead, MPG123_IoSeek, MPG123_IoClose);
+    if (result != MPG123_OK) {
+        SDL_SetError("mpg123_replace_reader_handle: %s", mpg_err(handle, result));
+        goto failed;
+    }
+
+    result = mpg123.mpg123_format_none(handle);
+    if (result != MPG123_OK) {
+        SDL_SetError("mpg123_format_none: %s", mpg_err(handle, result));
+        goto failed;
+    }
+
+    mpg123.mpg123_rates(&rates, &num_rates);
+    for (size_t i = 0; i < num_rates; ++i) {
+        const int channels = (MPG123_MONO|MPG123_STEREO);
+        const int formats = (MPG123_ENC_SIGNED_8 |
+                             MPG123_ENC_UNSIGNED_8 |
+                             MPG123_ENC_SIGNED_16 |
+                             MPG123_ENC_SIGNED_32 |
+                             MPG123_ENC_FLOAT_32);
+        mpg123.mpg123_format(handle, rates[i], channels, formats);
+    }
+
+    result = mpg123.mpg123_open_handle(handle, io);
+    if (result != MPG123_OK) {
+        SDL_SetError("mpg123_open_handle: %s", mpg_err(handle, result));
+        goto failed;
+    }
+
+    result = mpg123.mpg123_getformat(handle, &rate, &spec->channels, &encoding);
+    if (result != MPG123_OK) {
+        SDL_SetError("mpg123_getformat: %s", mpg_err(handle, result));
+        goto failed;
+    }
+
+#ifdef DEBUG_MPG123
+    SDL_Log("MPG123 format: %s, channels: %d, rate: %ld\n", MPG123FormatString(encoding), channels, rate);
+#endif
+
+    spec->format = FormatMPG123ToSDL(encoding);
+    SDL_assert(spec->format != SDL_AUDIO_UNKNOWN);
+    spec->freq = rate;
+
+
+    result = mpg123.mpg123_scan(handle);  // parse through whole file; it makes mpg123_length() accurate even if MP3 metadata is missing.
+    if (result != MPG123_OK) {
+        SDL_SetError("mpg123_scan: %s", mpg_err(handle, result));
+        goto failed;
+    }
+
+    // mpg123_length() returns sample frames, or MPG123_ERR, which happens to be -1, which we use for "don't know" here.
+    *duration_frames = (Sint64) mpg123.mpg123_length(handle);
+    
+    mpg123.mpg123_close(handle);
+    mpg123.mpg123_delete(handle);
+    handle = NULL;
+
+    // now rewind, load the whole thing to memory, and use that buffer for future processing.
+    if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {
+        goto failed;
+    }
+    data = (Uint8 *) SDL_LoadFile_IO(io, &datalen, false);
+    if (!data) {
+        goto failed;
+    }
+
+    payload = (MPG123_AudioUserData *) SDL_calloc(1, sizeof (*payload));
+    if (!payload) {
+        goto failed;
+    }
+
+    payload->data = data;
+    payload->datalen = datalen;
+
+    *audio_userdata = payload;
+
+    return true;
+
+failed:
+    if (handle) {
+        mpg123.mpg123_close(handle);
+        mpg123.mpg123_delete(handle);
+    }
+    SDL_free(data);
+    SDL_free(payload);
+    return false;
+}
+
+bool SDLCALL MPG123_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+{
+    MPG123_UserData *d = (MPG123_UserData *) SDL_calloc(1, sizeof (*d));
+    if (!d) {
+        return false;
+    }
+
+    const MPG123_AudioUserData *payload = (const MPG123_AudioUserData *) audio_userdata;
+
+    SDL_IOStream *io = SDL_IOFromConstMem(payload->data, payload->datalen);
+    if (!io) {
+        SDL_free(d);
+        return false;
+    }
+
+    int result = 0;
+    mpg123_handle *handle = mpg123.mpg123_new(NULL, &result);
+    if (result != MPG123_OK) {
+        SDL_free(d);
+        return SDL_SetError("mpg123_new failed");
+    }
+
+    result = mpg123.mpg123_replace_reader_handle(handle, MPG123_IoRead, MPG123_IoSeek, MPG123_IoClose);
+    if (result != MPG123_OK) {
+        SDL_SetError("mpg123_replace_reader_handle: %s", mpg_err(handle, result));
+        SDL_free(d);
+        mpg123.mpg123_delete(handle);
+        return false;
+    }
+
+    // !!! FIXME: can I just force the `spec` format here, or does that cause problems if we have a "frankenstein" mp3 that changes formats later?
+    result = mpg123.mpg123_format_none(handle);
+    if (result != MPG123_OK) {
+        SDL_SetError("mpg123_format_none: %s", mpg_err(handle, result));
+        SDL_free(d);
+        mpg123.mpg123_delete(handle);
+        return false;
+    }
+
+    const long *rates = NULL;
+    size_t num_rates = 0;
+    mpg123.mpg123_rates(&rates, &num_rates);
+    for (size_t i = 0; i < num_rates; ++i) {
+        const int channels = (MPG123_MONO|MPG123_STEREO);
+        const int formats = (MPG123_ENC_SIGNED_8 |
+                             MPG123_ENC_UNSIGNED_8 |
+                             MPG123_ENC_SIGNED_16 |
+                             MPG123_ENC_SIGNED_32 |
+                             MPG123_ENC_FLOAT_32);
+        mpg123.mpg123_format(handle, rates[i], channels, formats);
+    }
+
+    result = mpg123.mpg123_open_handle(handle, io);
+    if (result != MPG123_OK) {
+        SDL_SetError("mpg123_open_handle: %s", mpg_err(handle, result));
+        SDL_free(d);
+        mpg123.mpg123_delete(handle);
+        return false;
+    }
+
+    // !!! FIXME: should we do this? It makes seeking better, maybe?  mpg123.mpg123_scan(handle);
+
+    d->io = io;
+    d->payload = payload;
+    d->handle = handle;
+
+    *userdata = d;
+
+    return true;
+}
+
+bool SDLCALL MPG123_decode(void *userdata, SDL_AudioStream *stream)
+{
+    MPG123_UserData *d = (MPG123_UserData *) userdata;
+    SDL_AudioSpec spec;
+    int result;
+    size_t amount = 0;
+    long rate;
+    int channels, encoding;
+    Uint8 buffer[1024];
+
+    result = mpg123.mpg123_read(d->handle, buffer, sizeof (buffer), &amount);
+
+    if (result == MPG123_NEW_FORMAT) {
+        result = mpg123.mpg123_getformat(d->handle, &rate, &channels, &encoding);
+        if (result != MPG123_OK) {
+            return SDL_SetError("mpg123_getformat: %s", mpg_err(d->handle, result));
+        }
+
+        #ifdef DEBUG_MPG123
+        SDL_Log("MPG123 format: %s, channels: %d, rate: %ld\n", MPG123FormatString(encoding), channels, rate);
+        #endif
+
+        spec.format = FormatMPG123ToSDL(encoding);
+        spec.channels = channels;
+        spec.freq = (int)rate;
+        SDL_assert(spec.format != SDL_AUDIO_UNKNOWN);
+
+        SDL_SetAudioStreamFormat(stream, &spec, NULL);
+    }
+
+    if (amount > 0) {
+        SDL_PutAudioStreamData(stream, buffer, (int)amount);
+    }
+
+    if ((result != MPG123_OK) && (result != MPG123_DONE)) {
+        SDL_SetError("mpg123_read: %s", mpg_err(d->handle, result));
+    }
+
+    return (result == MPG123_OK);
+}
+
+bool SDLCALL MPG123_seek(void *userdata, Uint64 frame)
+{
+    MPG123_UserData *d = (MPG123_UserData *) userdata;
+    const off_t rc = mpg123.mpg123_seek(d->handle, (off_t) frame, SEEK_SET);
+    return (rc < 0) ? SDL_SetError("mpg123_seek:%s", mpg_err(d->handle, rc)) : true;
+}
+
+void SDLCALL MPG123_quit_track(void *userdata)
+{
+    MPG123_UserData *d = (MPG123_UserData *) userdata;
+    mpg123.mpg123_close(d->handle);
+    mpg123.mpg123_delete(d->handle);
+    SDL_CloseIO(d->io);
+    SDL_free(d);
+}
+
+void SDLCALL MPG123_quit_audio(void *audio_userdata)
+{
+    MPG123_AudioUserData *d = (MPG123_AudioUserData *) audio_userdata;
+    SDL_free((void *) d->data);
+    SDL_free(d);
+}
+
+Mix_Decoder Mix_Decoder_MPG123 = {
+    "MPG123",
+    MPG123_init,
+    MPG123_init_audio,
+    MPG123_init_track,
+    MPG123_decode,
+    MPG123_seek,
+    MPG123_quit_track,
+    MPG123_quit_audio,
+    MPG123_quit
+};
+
