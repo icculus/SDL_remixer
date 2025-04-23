@@ -401,7 +401,14 @@ bool SDLCALL FLAC_decode(void *userdata, SDL_AudioStream *stream)
 {
     FLAC_UserData *d = (FLAC_UserData *) userdata;
     d->stream = stream;
-    return !!flac.FLAC__stream_decoder_process_single(d->decoder);  // write callback will fill in stream. Might fill 0 if it hit a metadata block, but the higher level loops to get what it needs.
+
+    if (!flac.FLAC__stream_decoder_process_single(d->decoder)) {  // write callback will fill in stream. Might fill 0 if it hit a metadata block, but the higher level loops to get what it needs.
+        return false;
+    } else if (flac.FLAC__stream_decoder_get_state(d->decoder) == FLAC__STREAM_DECODER_END_OF_STREAM) {
+        return false;  // we're done.
+    }
+
+    return true;
 }
 
 bool SDLCALL FLAC_seek(void *userdata, Uint64 frame)
