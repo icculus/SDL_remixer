@@ -115,6 +115,7 @@ static bool SDLCALL GME_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
         SET_GME_METADATA(system, NULL);
         SET_GME_METADATA(comment, NULL);
         SET_GME_METADATA(dumper, NULL);
+        #undef SET_GME_METADATA
 
         if ((info->intro_length >= 0) && (info->loop_length > 0)) {
             *duration_frames = MIX_DURATION_INFINITE;
