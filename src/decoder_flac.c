@@ -65,6 +65,8 @@ typedef struct FLAC_UserData
     SDL_AudioStream *stream;
     SDL_AudioSpec spec;
     int bits_per_sample;
+    Uint8 *cvtbuf;
+    size_t cvtbuflen;
 } FLAC_UserData;
 
 
@@ -132,7 +134,7 @@ static FLAC__StreamDecoderWriteStatus FLAC_IoWrite(const FLAC__StreamDecoder *de
     FLAC_UserData *d = (FLAC_UserData *) userdata;
     SDL_AudioStream *stream = d->stream;
     const int headerchannels = (int) frame->header.channels;
-    int sdlchannels = (int) headerchannels;
+    int sdlchannels = headerchannels;
     if (sdlchannels == 3) {
         sdlchannels = 6;  // !!! FIXME: this is kinda gross, but FLAC 3-channel is FL, FR, FC, whereas SDL is FL, FR, LFE...we don't have a "front center" channel until 5.1 output.  :/  The channel mask thing Sam wants in SDL3 would fix this.
     }
@@ -150,61 +152,55 @@ static FLAC__StreamDecoderWriteStatus FLAC_IoWrite(const FLAC__StreamDecoder *de
         } else if (d->bits_per_sample <= 32) {
             d->spec.format = SDL_AUDIO_S32;
         }
-
         SDL_SetAudioStreamFormat(stream, &d->spec, NULL);
-        if (headerchannels == 3) {
-            static const int chmap[] = { 0, 1, 2, -1, -1, -1 };
-            SDL_SetAudioStreamInputChannelMap(stream, chmap, SDL_arraysize(chmap));
-        } else {
-            SDL_SetAudioStreamInputChannelMap(stream, NULL, 0);
-        }
     }
 
-    // !!! FIXME: this is a copy/paste from decoder_vorbis.c
-    #define INTERLEAVE(typ, shift) { \
-        typ samples[256]; \
-        if (headerchannels== 3) { SDL_zeroa(samples); }  /* prevent valgrind complaints */ \
-        const int max_frames = SDL_arraysize(samples) / sdlchannels;  /* most sample frames per chunk. */ \
-        const int num_chunks = (int) (frame->header.blocksize / max_frames); \
-        const int chunksize = max_frames * sdlchannels * sizeof (typ); \
-        int iframe = 0; \
-        for (int chunk = 0; chunk < num_chunks; chunk++) { \
-            typ *fptr = samples; \
-            for (int i = 0; i < max_frames; i++) { \
-                for (int channel = 0; channel < headerchannels; channel++) { \
-                    *(fptr++) = (typ) (buffer[channel][iframe] << shift); \
-                } \
-                iframe++; \
-                fptr += (sdlchannels - headerchannels); \
-            } \
-            SDL_PutAudioStreamData(stream, samples, chunksize); \
-        } \
-        /* put the last bit. */ \
-        SDL_assert(iframe <= frame->header.blocksize); \
-        SDL_assert(((frame->header.blocksize - iframe) * sdlchannels) <= SDL_arraysize(samples)); \
-        const int remaining = frame->header.blocksize - iframe; \
-        if (remaining > 0) { \
-            typ *fptr = samples; \
-            for (int i = 0; i < remaining; i++) { \
-                for (int channel = 0; channel < headerchannels; channel++) { \
-                    *(fptr++) = (typ) (buffer[channel][iframe] << shift); \
-                } \
-                iframe++; \
-                fptr += (sdlchannels - headerchannels); \
-            } \
-            SDL_PutAudioStreamData(stream, samples, remaining * sdlchannels * sizeof (typ)); \
-        } \
-        SDL_assert(iframe == frame->header.blocksize); \
+    const size_t samples = (size_t) frame->header.blocksize;
+    const size_t onebuflen = ((size_t) SDL_AUDIO_BYTESIZE(d->spec.format)) * samples;
+    const size_t buflen = onebuflen * headerchannels;
+    if (d->cvtbuflen < buflen) {
+        void *ptr = SDL_realloc(d->cvtbuf, buflen);
+        if (!ptr) {
+            return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
+        }
+        d->cvtbuf = (Uint8 *) ptr;
+        d->cvtbuflen = buflen;
+    }
+
+    void *channel_arrays[32];
+    SDL_assert(SDL_arraysize(channel_arrays) >= headerchannels);
+    for (int i = 0; i < headerchannels; i++) {
+        channel_arrays[i] = d->cvtbuf + (i * onebuflen);
+    }
+
+    if (headerchannels == 3) {  // If we padded out to 5.1 to get a front-center channel, null out the three extra channels we don't actually use.
+        channel_arrays[3] = channel_arrays[4] = channel_arrays[5] = NULL;
+    } else {
+        SDL_assert(sdlchannels == headerchannels);
     }
 
     const int shift = SDL_AUDIO_BITSIZE(d->spec.format) - d->bits_per_sample;
 
+    #define PREP_CHANNEL_ARRAY(typ) { \
+        for (int channel = 0; channel < headerchannels; channel++) { \
+            const Sint32 *src = (const Sint32 *) buffer[channel]; \
+            typ *dst = (typ *) channel_arrays[channel]; \
+            for (int i = 0; i < samples; i++) { \
+                dst[i] = (typ) (src[i] << shift); \
+            } \
+        } \
+    }
+
     switch (d->spec.format) {
-        case SDL_AUDIO_S8: INTERLEAVE(Sint8, shift); break;
-        case SDL_AUDIO_S16: INTERLEAVE(Sint16, shift); break;
-        case SDL_AUDIO_S32: INTERLEAVE(Sint32, shift); break;
+        case SDL_AUDIO_S8: PREP_CHANNEL_ARRAY(Sint8); break;
+        case SDL_AUDIO_S16: PREP_CHANNEL_ARRAY(Sint16); break;
+        case SDL_AUDIO_S32: PREP_CHANNEL_ARRAY(Sint32); break;
         default: SDL_assert(!"Unexpected audio data type"); return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
     }
+
+    #undef PREP_CHANNEL_ARRAY
+
+    SDL_PutAudioStreamPlanarData(stream, (const void * const *) channel_arrays, samples);
 
     return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
 }
@@ -427,6 +423,7 @@ void SDLCALL FLAC_quit_track(void *userdata)
     flac.FLAC__stream_decoder_finish(d->decoder);
     flac.FLAC__stream_decoder_delete(d->decoder);
     SDL_CloseIO(d->io);
+    SDL_free(d->cvtbuf);
     SDL_free(d);
 }
 

@@ -271,9 +271,8 @@ bool SDLCALL VORBIS_decode(void *userdata, SDL_AudioStream *stream)
         return set_ov_error("ov_read", amount);
     }
 #else
-    float samples[256];
     float **pcm_channels = NULL;
-    const int amount = (int)vorbis.ov_read_float(&d->vf, &pcm_channels, SDL_arraysize(samples), &bitstream);
+    const int amount = (int)vorbis.ov_read_float(&d->vf, &pcm_channels, 256, &bitstream);
     if (amount < 0) {
         return set_ov_error("ov_read_float", amount);
     }
@@ -299,47 +298,7 @@ bool SDLCALL VORBIS_decode(void *userdata, SDL_AudioStream *stream)
 #ifdef VORBIS_USE_TREMOR
     SDL_PutAudioStreamData(stream, samples, amount);  // ov_read gave us bytes, not sample frames.
 #else
-    SDL_assert(amount <= SDL_arraysize(samples));
-    const int channels = d->current_channels;
-    if (channels == 1) {  // one channel, just copy it right through.
-        SDL_PutAudioStreamData(stream, samples, amount * sizeof (float));
-    } else {  // multiple channels, we need to interleave them.
-        // We have `amount` sample frames, which is <= SDL_arraysize(samples), but at most,
-        //  `samples` is `channels` multiples too small to hold the interleaved data, so
-        //  interleave it and put it to the audio stream in chunks.
-        const int max_frames = SDL_arraysize(samples) / channels;  // most sample frames per chunk.
-        const int num_chunks = amount / max_frames;
-        const int chunksize = max_frames * channels * sizeof (float);
-        int frame = 0;
-        for (int chunk = 0; chunk < num_chunks; chunk++) {
-            float *fptr = samples;
-            for (int i = 0; i < max_frames; i++) {
-                for (int channel = 0; channel < channels; channel++) {
-                    *(fptr++) = pcm_channels[channel][frame];
-                }
-                frame++;
-            }
-            SDL_PutAudioStreamData(stream, samples, chunksize);
-        }
-
-        // put the last bit.
-        SDL_assert(frame <= amount);
-        SDL_assert(((amount - frame) * channels) <= SDL_arraysize(samples));
-
-        const int remaining = amount - frame;
-        if (remaining > 0) {
-            float *fptr = samples;
-            for (int i = 0; i < remaining; i++) {
-                for (int channel = 0; channel < channels; channel++) {
-                    *(fptr++) = pcm_channels[channel][frame];
-                }
-                frame++;
-            }
-            SDL_PutAudioStreamData(stream, samples, remaining * channels * sizeof (float));
-        }
-
-        SDL_assert(frame == amount);
-    }
+    SDL_PutAudioStreamPlanarData(stream, (const void * const *) pcm_channels, amount);
 #endif
 
     return true;  // had more data to decode.
