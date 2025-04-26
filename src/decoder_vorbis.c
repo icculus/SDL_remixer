@@ -298,7 +298,7 @@ bool SDLCALL VORBIS_decode(void *userdata, SDL_AudioStream *stream)
 #ifdef VORBIS_USE_TREMOR
     SDL_PutAudioStreamData(stream, samples, amount);  // ov_read gave us bytes, not sample frames.
 #else
-    SDL_PutAudioStreamPlanarData(stream, (const void * const *) pcm_channels, amount);
+    SDL_PutAudioStreamPlanarData(stream, (const void * const *) pcm_channels, -1, amount);
 #endif
 
     return true;  // had more data to decode.
