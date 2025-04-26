@@ -39,6 +39,10 @@
 extern "C" {
 #endif
 
+// !!! FIXME: remove '//' comments.
+// !!! FIXME: document this whole thing.
+// !!! FIXME: rename symbols from Mix_ to MIX_ ...?
+
 typedef struct Mix_Audio Mix_Audio;
 typedef struct Mix_Track Mix_Track;
 
