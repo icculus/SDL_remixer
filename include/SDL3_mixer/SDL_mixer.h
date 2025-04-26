@@ -98,7 +98,7 @@ extern SDL_DECLSPEC void SDLCALL Mix_DestroyAudio(Mix_Audio *audio);  // referen
 // them in an array somewhere.
 
 extern SDL_DECLSPEC Mix_Track * SDLCALL Mix_CreateTrack(void);
-extern SDL_DECLSPEC void SDLCALL Mix_DestroyTrack(Mix_Track *track);  // will halt playback, if playing. Won't call Finished callback, though. We assume you know.
+extern SDL_DECLSPEC void SDLCALL Mix_DestroyTrack(Mix_Track *track);  // will halt playback, if playing. Won't call Stopped callback, though. We assume you know.
 
 extern SDL_DECLSPEC bool SDLCALL Mix_SetTrackAudio(Mix_Track *track, Mix_Audio *audio);  // Track will replace current audio with new one. If currently playing, will start playing new audio immediately.
 extern SDL_DECLSPEC bool SDLCALL Mix_SetTrackAudioStream(Mix_Track *track, SDL_AudioStream *stream);  // insert anything you like into the mix. procedural audio, VoIP, data right from a microphone, etc. Will pull from AudioStream as needed instead of a Mix_Audio.
@@ -127,15 +127,15 @@ extern SDL_DECLSPEC bool SDLCALL Mix_PlayTrack(Mix_Track *track, Sint64 maxFrame
 extern SDL_DECLSPEC bool SDLCALL Mix_PlayTag(const char *tag, Sint64 maxTicks, int loops, Sint64 fadeIn);  // play everything with this tag.
 
 // Play a loaded audio file once from start to finish, have SDL_mixer manage a Mix_Track internally for it. This is for fire-and-forget sounds that need _zero_ adjustment, including pausing.
-extern SDL_DECLSPEC bool SDLCALL Mix_PlayOnce(Mix_Audio *audio);
+extern SDL_DECLSPEC bool SDLCALL Mix_PlayAudio(Mix_Audio *audio);
 
 
 // halt playing audio. If (fadeOut > 0), fade out over X milliseconds before halting. if <= 0, halt immediately.
-extern SDL_DECLSPEC bool SDLCALL Mix_HaltTrack(Mix_Track *track, Sint64 fadeOut);  // halt a playing Mix_Track. No-op if not playing.
-extern SDL_DECLSPEC bool SDLCALL Mix_HaltAllTracks(Sint64 fadeOut);  // halt anything that's playing.
-extern SDL_DECLSPEC bool SDLCALL Mix_HaltTag(const char *tag, Sint64 fadeOut);  // halt all playing Mix_Tracks with a matching tag.
+extern SDL_DECLSPEC bool SDLCALL Mix_StopTrack(Mix_Track *track, Sint64 fadeOut);  // halt a playing Mix_Track. No-op if not playing.
+extern SDL_DECLSPEC bool SDLCALL Mix_StopAllTracks(Sint64 fadeOut);  // halt anything that's playing.
+extern SDL_DECLSPEC bool SDLCALL Mix_StopTag(const char *tag, Sint64 fadeOut);  // halt all playing Mix_Tracks with a matching tag.
 
-// Pausing is not halting (so no finished callback, fire-and-forget sources don't destruct, resuming doesn't rewind audio to start).
+// Pausing is not stopping (so no stopped callback, fire-and-forget sources don't destruct, resuming doesn't rewind audio to start).
 extern SDL_DECLSPEC bool SDLCALL Mix_PauseTrack(Mix_Track *track);  // pause a playing Mix_Track. No-op if not playing.
 extern SDL_DECLSPEC bool SDLCALL Mix_PauseAllTracks(void);  // pause anything that's playing.
 extern SDL_DECLSPEC bool SDLCALL Mix_PauseTag(const char *tag);  // pause all playing Mix_Tracks with a matching tag.
@@ -145,8 +145,8 @@ extern SDL_DECLSPEC bool SDLCALL Mix_ResumeTrack(Mix_Track *track);  // resume a
 extern SDL_DECLSPEC bool SDLCALL Mix_ResumeAllTracks(void);  // resume anything that's playing.
 extern SDL_DECLSPEC bool SDLCALL Mix_ResumeTag(const char *tag);  // resume all playing Mix_Tracks with a matching tag.
 
-extern SDL_DECLSPEC bool SDLCALL Mix_Playing(Mix_Track *track);  // true if source is playing.
-extern SDL_DECLSPEC bool SDLCALL Mix_Paused(Mix_Track *track);  // true if source is paused.
+extern SDL_DECLSPEC bool SDLCALL Mix_TrackPlaying(Mix_Track *track);  // true if source is playing.
+extern SDL_DECLSPEC bool SDLCALL Mix_TrackPaused(Mix_Track *track);  // true if source is paused.
 
 
 // volume control...
@@ -170,13 +170,13 @@ extern SDL_DECLSPEC bool SDLCALL Mix_SetTrackOutputChannelMap(Mix_Track *track, 
 
 // hooks...
 
-typedef void (SDLCALL *Mix_TrackFinishedCallback)(void *userdata, Mix_Track *track);
-extern SDL_DECLSPEC bool SDLCALL Mix_SetFinishedCallback(Mix_Track *track, Mix_TrackFinishedCallback cb, void *userdata);  // if set, is called when an track halts for any reason except destruction.
+typedef void (SDLCALL *Mix_TrackStoppedCallback)(void *userdata, Mix_Track *track);
+extern SDL_DECLSPEC bool SDLCALL Mix_SetTrackStoppedCallback(Mix_Track *track, Mix_TrackStoppedCallback cb, void *userdata);  // if set, is called when an track halts for any reason except destruction.
 
-extern SDL_DECLSPEC bool SDLCALL Mix_SetPostMix(SDL_AudioPostmixCallback mix_func, void *userdata);  // just calls the standard SDL postmix callback.
+extern SDL_DECLSPEC bool SDLCALL Mix_SetPostMixCallback(SDL_AudioPostmixCallback mix_func, void *userdata);  // just calls the standard SDL postmix callback.
 
 typedef void (SDLCALL *Mix_TrackMixCallback)(void *userdata, Mix_Track *track, const SDL_AudioSpec *spec, float *pcm, int samples);
-extern SDL_DECLSPEC bool SDLCALL Mix_SetTrackMix(Mix_Track *track, Mix_TrackMixCallback cb, void *userdata);  // is called as data is to be mixed, so you can view (and edit) the source's data. Always in float32 format!
+extern SDL_DECLSPEC bool SDLCALL Mix_SetTrackMixCallback(Mix_Track *track, Mix_TrackMixCallback cb, void *userdata);  // is called as data is to be mixed, so you can view (and edit) the source's data. Always in float32 format!
 
 /* Ends C function definitions when using C++ */
 #ifdef __cplusplus

@@ -75,8 +75,8 @@ struct Mix_Track
     SDL_PropertiesID tags;  // lookup tags to see if they are currently applied to this track (true or false).
     Mix_TrackMixCallback mix_callback;
     void *mix_callback_userdata;
-    Mix_TrackFinishedCallback finished_callback;
-    void *finished_callback_userdata;
+    Mix_TrackStoppedCallback stopped_callback;
+    void *stopped_callback_userdata;
     Mix_Track *prev;  // double-linked list for all_tracks.
     Mix_Track *next;
     Mix_Track *fire_and_forget_next;  // linked list for the fire-and-forget pool.

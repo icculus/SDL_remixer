@@ -145,16 +145,16 @@ static void SDLCALL AudioIterationEnd(void *userdata, SDL_AudioDeviceID devid, b
 
 
 // this assumes LockTrack(track) was called before this.
-static void TrackFinished(Mix_Track *track)
+static void TrackStopped(Mix_Track *track)
 {
     SDL_assert(track->state != MIX_STATE_STOPPED);  // shouldn't be already stopped at this point.
     track->state = MIX_STATE_STOPPED;
-    if (track->finished_callback) {
-        track->finished_callback(track->finished_callback_userdata, track);
+    if (track->stopped_callback) {
+        track->stopped_callback(track->stopped_callback_userdata, track);
     }
     if (track->fire_and_forget) {
-        SDL_assert(!track->finished_callback);  // these shouldn't have finished callbacks.
-        SDL_assert(track->state == MIX_STATE_STOPPED);  // should not have changed, shouldn't have a finished_callback, etc.
+        SDL_assert(!track->stopped_callback);  // these shouldn't have stopped callbacks.
+        SDL_assert(track->state == MIX_STATE_STOPPED);  // should not have changed, shouldn't have a stopped_callback, etc.
         SDL_assert(track->fire_and_forget_next == NULL);  // shouldn't be in the list at all right now.
         Mix_SetTrackAudio(track, NULL);
         LockMixerState();
@@ -268,7 +268,7 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
     if (additional_amount > track->input_buffer_len) {
         void *ptr = SDL_realloc(track->input_buffer, additional_amount);
         if (!ptr) {   // uhoh.
-            TrackFinished(track);  // not much to be done, we're out of memory!
+            TrackStopped(track);  // not much to be done, we're out of memory!
             return;
         }
         track->input_buffer = (Uint8 *) ptr;
@@ -278,8 +278,8 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
     float *pcm = (float *) track->input_buffer;  // we always work in float32 format.
     int bytes_remaining = additional_amount;
 
-    // Calling TrackFinished() might have a finished_callback that restarts the track, so don't break the loop
-    //  for simply being finished, so we can generate audio without gaps. If not restarted, track->state will no longer be PLAYING.
+    // Calling TrackStopped() might have a stopped_callback that restarts the track, so don't break the loop
+    //  for simply being stopped, so we can generate audio without gaps. If not restarted, track->state will no longer be PLAYING.
     while ((track->state == MIX_STATE_PLAYING) && (bytes_remaining > 0)) {
         bool end_of_audio = false;
         int br = 0;   // bytes read.
@@ -345,33 +345,33 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
             bytes_remaining -= put_bytes;
         }
 
-        // remember that the callback in TrackFinished() might restart this track,
+        // remember that the callback in TrackStopped() might restart this track,
         //  so we'll loop to see if we can fill in more audio without a gap even in that case.
         if (end_of_audio) {
-            bool track_finished = false;
+            bool track_stopped = false;
             if (track->loops_remaining == 0) {
                 if (track->silence_frames < 0) {
                     track->silence_frames = -track->silence_frames;  // time to start appending silence.
                 } else {
-                    track_finished = true;  // out of data, no loops remain, no appended silence left, we're done.
+                    track_stopped = true;  // out of data, no loops remain, no appended silence left, we're done.
                 }
             } else {
                 if (track->loops_remaining > 0) {  // negative means infinite loops, so don't decrement for that.
                     track->loops_remaining--;
                 }
                 if (!track->input_audio) {  // can't loop on a streaming input, you're done.
-                    track_finished = true;
+                    track_stopped = true;
                 } else {
                     if (!track->input_audio->decoder->seek(track->decoder_userdata, track->loop_start)) {
-                        track_finished = true;  // uhoh, can't seek! Abandon ship!
+                        track_stopped = true;  // uhoh, can't seek! Abandon ship!
                     } else {
                         track->position = track->loop_start;
                     }
                 }
             }
 
-            if (track_finished) {
-                TrackFinished(track);
+            if (track_stopped) {
+                TrackStopped(track);
             }
         }
     }
@@ -455,7 +455,7 @@ failed:
 void Mix_CloseMixer(void)
 {
     if (audio_device) {
-        Mix_HaltAllTracks(0);
+        Mix_StopAllTracks(0);
 
         while (all_tracks) {
             Mix_DestroyTrack(all_tracks);
@@ -1343,7 +1343,7 @@ bool Mix_PlayTag(const char *tag, Sint64 maxTicks, int loops, Sint64 fadeIn)
     return retval;
 }
 
-bool Mix_PlayOnce(Mix_Audio *audio)
+bool Mix_PlayAudio(Mix_Audio *audio)
 {
     if (!CheckAudioParam(audio)) {
         return false;
@@ -1370,12 +1370,12 @@ bool Mix_PlayOnce(Mix_Audio *audio)
     return Mix_PlayTrack(track, -1, 0, 0, 0, 0, 0);
 }
 
-static void HaltTrack(Mix_Track *track, Sint64 fadeOut)
+static void StopTrack(Mix_Track *track, Sint64 fadeOut)
 {
     LockTrack(track);
     if (track->state != MIX_STATE_STOPPED) {
         if (fadeOut <= 0) {  // stop immediately.
-            TrackFinished(track);
+            TrackStopped(track);
         } else {
             track->total_fade_frames = fadeOut;
             track->fade_frames = track->total_fade_frames;
@@ -1386,17 +1386,17 @@ static void HaltTrack(Mix_Track *track, Sint64 fadeOut)
     UnlockTrack(track);
 }
 
-bool Mix_HaltTrack(Mix_Track *track, Sint64 fadeOut)
+bool Mix_StopTrack(Mix_Track *track, Sint64 fadeOut)
 {
     if (!CheckTrackParam(track)) {
         return false;
     }
 
-    HaltTrack(track, fadeOut);
+    StopTrack(track, fadeOut);
     return true;
 }
 
-bool Mix_HaltAllTracks(Sint64 fadeOut)
+bool Mix_StopAllTracks(Sint64 fadeOut)
 {
     if (!CheckInitialized()) {
         return false;
@@ -1405,7 +1405,7 @@ bool Mix_HaltAllTracks(Sint64 fadeOut)
     LockMixerSync();
 
     for (Mix_Track *track = all_tracks; track != NULL; track = track->next) {
-        HaltTrack(track, (fadeOut > 0) ? Mix_TrackMSToFrames(track, fadeOut) : -1);
+        StopTrack(track, (fadeOut > 0) ? Mix_TrackMSToFrames(track, fadeOut) : -1);
     }
 
     UnlockMixerSync();
@@ -1413,7 +1413,7 @@ bool Mix_HaltAllTracks(Sint64 fadeOut)
     return true;
 }
 
-bool Mix_HaltTag(const char *tag, Sint64 fadeOut)
+bool Mix_StopTag(const char *tag, Sint64 fadeOut)
 {
     if (!CheckTagParam(tag)) {
         return false;
@@ -1428,7 +1428,7 @@ bool Mix_HaltTag(const char *tag, Sint64 fadeOut)
 
     const size_t total = list->num_tracks;
     for (size_t i = 0; i < total; i++) {
-        HaltTrack(list->tracks[i], (fadeOut > 0) ? Mix_TrackMSToFrames(list->tracks[i], fadeOut) : -1);
+        StopTrack(list->tracks[i], (fadeOut > 0) ? Mix_TrackMSToFrames(list->tracks[i], fadeOut) : -1);
     }
 
     SDL_UnlockRWLock(list->rwlock);
@@ -1555,7 +1555,7 @@ bool Mix_ResumeTag(const char *tag)
     return true;
 }
 
-bool Mix_Playing(Mix_Track *track)
+bool Mix_TrackPlaying(Mix_Track *track)
 {
     if (!CheckTrackParam(track)) {
         return false;
@@ -1567,7 +1567,7 @@ bool Mix_Playing(Mix_Track *track)
 }
 
 
-bool Mix_Paused(Mix_Track *track)
+bool Mix_TrackPaused(Mix_Track *track)
 {
     if (!CheckTrackParam(track)) {
         return false;
@@ -1578,15 +1578,15 @@ bool Mix_Paused(Mix_Track *track)
     return retval;
 }
 
-bool Mix_SetFinishedCallback(Mix_Track *track, Mix_TrackFinishedCallback cb, void *userdata)
+bool Mix_SetTrackStoppedCallback(Mix_Track *track, Mix_TrackStoppedCallback cb, void *userdata)
 {
     if (!CheckTrackParam(track)) {
         return false;
     }
 
     LockTrack(track);
-    track->finished_callback = cb;
-    track->finished_callback_userdata = userdata;
+    track->stopped_callback = cb;
+    track->stopped_callback_userdata = userdata;
     UnlockTrack(track);
 
     return true;
@@ -1721,7 +1721,7 @@ bool Mix_SetTrackOutputChannelMap(Mix_Track *track, const int *chmap, int count)
     return retval;
 }
 
-bool Mix_SetPostMix(SDL_AudioPostmixCallback mix_func, void *userdata)
+bool Mix_SetPostMixCallback(SDL_AudioPostmixCallback mix_func, void *userdata)
 {
     if (!CheckInitialized()) {
         return false;
@@ -1729,7 +1729,7 @@ bool Mix_SetPostMix(SDL_AudioPostmixCallback mix_func, void *userdata)
     return SDL_SetAudioPostmixCallback(audio_device, mix_func, userdata);
 }
 
-bool Mix_SetTrackMix(Mix_Track *track, Mix_TrackMixCallback cb, void *userdata)
+bool Mix_SetTrackMixCallback(Mix_Track *track, Mix_TrackMixCallback cb, void *userdata)
 {
     if (!CheckTrackParam(track)) {
         return false;
