@@ -67,12 +67,13 @@ extern SDL_DECLSPEC MIX_Audio * SDLCALL MIX_LoadAudioWithProperties(SDL_Properti
 #define MIX_PROP_AUDIO_LOAD_PREDECODE_BOOLEAN "SDL_mixer.audio.load.predecode"
 #define MIX_PROP_AUDIO_DECODER_STRING "SDL_mixer.audio.decoder"
 
-// !!! FIXME: track number?
 #define MIX_PROP_METADATA_TITLE_STRING "SDL_mixer.metadata.title"
 #define MIX_PROP_METADATA_ARTIST_STRING "SDL_mixer.metadata.artist"
 #define MIX_PROP_METADATA_ALBUM_STRING "SDL_mixer.metadata.album"
 #define MIX_PROP_METADATA_COPYRIGHT_STRING "SDL_mixer.metadata.copyright"
-#define MIX_PROP_METADATA_TRACKNUM_NUMBER "SDL_mixer.metadata.tracknum"
+#define MIX_PROP_METADATA_TRACK_NUMBER "SDL_mixer.metadata.track"
+#define MIX_PROP_METADATA_TOTAL_TRACKS_NUMBER "SDL_mixer.metadata.total_tracks"
+#define MIX_PROP_METADATA_YEAR_NUMBER "SDL_mixer.metadata.year"
 #define MIX_PROP_METADATA_DURATION_FRAMES_NUMBER "SDL_mixer.metadata.duration_frames"  // this is in sample frames and might be off by a little if the decoder only knew it by time. Unset if unknown.
 #define MIX_PROP_METADATA_DURATION_INFINITE_BOOLEAN "SDL_mixer.metadata.duration_infinite"   // if true, audio never runs out of audio to generate. This isn't necessarily always known to SDL_mixer itself, though.
 

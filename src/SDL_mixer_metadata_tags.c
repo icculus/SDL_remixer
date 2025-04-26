@@ -94,6 +94,13 @@ static char *parse_id3v1_ansi_string(const Uint8 *buffer, size_t src_len)
     }
     SDL_memcpy(src_buffer, buffer, src_len);
     src_buffer[src_len] = '\0';
+
+    // trim whitespace from end (some id3v1 tags pad out with space instead of nulls).
+    for (size_t i = src_len - 1; (i >= 0) && (src_buffer[i] == ' '); i--) {
+        src_buffer[i] = '\0';
+        src_len--;
+    }
+
     char *ret = SDL_iconv_string("UTF-8", "ISO-8859-1", src_buffer, src_len + 1);
     SDL_free(src_buffer);
     return ret;
@@ -103,7 +110,7 @@ static void id3v1_set_tag(SDL_PropertiesID props, const char *key, const Uint8 *
 {
     if (!SDL_HasProperty(props, key)) {  // in case there are multiple ID3v1 tags appended to a file, we'll take the last one, since we parse backwards from the end of file.
         char *src_buf = parse_id3v1_ansi_string(buffer, len);
-        if (src_buf) {
+        if (src_buf && *src_buf) {
             SDL_SetStringProperty(props, key, src_buf);
             SDL_free(src_buf);
         }
@@ -113,21 +120,19 @@ static void id3v1_set_tag(SDL_PropertiesID props, const char *key, const Uint8 *
 // Parse content of ID3v1 tag
 static void parse_id3v1(SDL_PropertiesID props, const Uint8 *buffer)
 {
+    // ID3v1.1: if the second-to-last byte of the comment field is a zero (null terminator), treat the last byte as the track number (which should also be zero in ID3v1.0).
+    const bool has_tracknum = (buffer[ID3v1_FIELD_TRACK] == 0) && (buffer[ID3v1_FIELD_TRACK+1] != 0);
+
     id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.title",   buffer + ID3v1_FIELD_TITLE,     ID3v1_SIZE_OF_FIELD);
     id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.artist",  buffer + ID3v1_FIELD_ARTIST,    ID3v1_SIZE_OF_FIELD);
     id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.album",   buffer + ID3v1_FIELD_ALBUM,     ID3v1_SIZE_OF_FIELD);
-    id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.comment", buffer + ID3v1_FIELD_COPYRIGHT, ID3v1_SIZE_OF_FIELD);
+    id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.comment", buffer + ID3v1_FIELD_COPYRIGHT, ID3v1_SIZE_OF_FIELD - (has_tracknum ? 2 : 0));
+    id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.year",    buffer + ID3v1_FIELD_YEAR, ID3v1_SIZE_OF_YEAR_FIELD);
 
-    if (!SDL_HasProperty(props, "SDL_mixer.metadata.id3v1.year")) {
-        char str[ID3v1_SIZE_OF_YEAR_FIELD + 1];
-        SDL_memcpy(str, buffer + ID3v1_FIELD_YEAR, ID3v1_SIZE_OF_YEAR_FIELD);
-        str[ID3v1_SIZE_OF_YEAR_FIELD] = '\0';
-        SDL_SetNumberProperty(props, "SDL_mixer.metadata.id3v1.year", (Sint64) SDL_atoi(str));
-    }
-
-    // ID3v1.1: if the second-to-last byte of the comment field is a zero (null terminator), treat the last byte as the track number (which should also be zero in ID3v1.0).
-    if ((buffer[ID3v1_FIELD_TRACK] == 0) && !SDL_HasProperty(props, "SDL_mixer.metadata.id3v1.track")) {
-        SDL_SetNumberProperty(props, "SDL_mixer.metadata.id3v1.track", (Sint64) buffer[ID3v1_FIELD_TRACK+1]);
+    if (has_tracknum) {
+        char str[8];
+        SDL_snprintf(str, sizeof (str), "%u", (unsigned int) buffer[ID3v1_FIELD_TRACK+1]);
+        id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.track", str, SDL_strlen(str));
     }
 }
 
@@ -1007,6 +1012,58 @@ static int probe_lyrics3(SDL_IOStream *io, Uint8 *buf, MIX_IoClamp *clamp)
     return TAG_NOT_FOUND;
 }
 
+static void ParseTrackNumString(const char *str, Sint64 *track, Sint64 *total_tracks)
+{
+    SDL_assert(track != NULL);
+    SDL_assert(total_tracks != NULL);
+
+    *track = *total_tracks = -1;
+
+    if (!str) {
+        return;
+    }
+
+    const char *trackstr = str;
+    const char *totalstr = NULL;
+    char *cpy = NULL;
+    char *ptr = (char *) SDL_strchr(str, '/');  // see if it has both track _and_ total tracks.
+
+    if (ptr) {
+        cpy = SDL_strdup(str);
+        if (!cpy) {
+            return;  // oh well.
+        }
+        ptr = cpy + (ptr - str);
+        *ptr = '\0';
+        trackstr = cpy;
+        totalstr = ptr + 1;
+    }
+
+    SDL_assert(trackstr != NULL);
+
+    char *endp = NULL;
+    Sint64 ivalue;
+
+    ivalue = (Sint64) SDL_strtoll(trackstr, &endp, 10);
+    if ((*trackstr != '\0') && (*endp == '\0')) {  // if true, entire string was a valid number.
+        if (ivalue >= 0) {  // reject negative numbers, though.
+            *track = ivalue;
+        }
+    }
+
+    if ((*track > 0) && (totalstr != NULL)) {
+        endp = NULL;
+        ivalue = (Sint64) SDL_strtoll(trackstr, &endp, 10);
+        if ((*totalstr != '\0') && (*endp == '\0')) {  // if true, entire string was a valid number.
+            if (ivalue >= 0) {  // reject negative numbers, though.
+                *total_tracks = ivalue;
+            }
+        }
+    }
+
+    SDL_free(cpy);
+}
+
 
 // !!! FIXME: several invalid tag things might cause a false return from here, but we should
 // !!! FIXME:  just parse and clamp out what we can and only return false for legit i/o errors.
@@ -1093,24 +1150,47 @@ bool MIX_ReadMetadataTags(SDL_IOStream *io, SDL_PropertiesID props, MIX_IoClamp 
     static const char * const artist_keys[] = { "SDL_mixer.metadata.id3v2.TPE1", "SDL_mixer.metadata.id3v2.TP1", "SDL_mixer.metadata.ape.artist", "SDL_mixer.metadata.id3v1.artist" };
     static const char * const album_keys[] = { "SDL_mixer.metadata.id3v2.TALB", "SDL_mixer.metadata.id3v2.TAL", "SDL_mixer.metadata.ape.album", "SDL_mixer.metadata.id3v1.album" };
     static const char * const copyright_keys[] = { "SDL_mixer.metadata.id3v2.TCOP", "SDL_mixer.metadata.id3v2.TCR", "SDL_mixer.metadata.ape.copyright", "SDL_mixer.metadata.id3v1.comment" };
+    static const char * const year_keys[] = { "SDL_mixer.metadata.id3v2.TYER", "SDL_mixer.metadata.id3v2.TYE", "SDL_mixer.metadata.ape.year", "SDL_mixer.metadata.id3v1.year" };
 
-    static const struct { const char *mixer; const char * const * tags; } tagmap_strings[] = {
-        { MIX_PROP_METADATA_TITLE_STRING, title_keys },
-        { MIX_PROP_METADATA_ARTIST_STRING, artist_keys },
-        { MIX_PROP_METADATA_ALBUM_STRING, album_keys},
-        { MIX_PROP_METADATA_COPYRIGHT_STRING, copyright_keys }
+    static const struct { const char *mixer; SDL_PropertyType type; const char * const * tags; } tagmap[] = {
+        { MIX_PROP_METADATA_TITLE_STRING, SDL_PROPERTY_TYPE_STRING, title_keys },
+        { MIX_PROP_METADATA_ARTIST_STRING, SDL_PROPERTY_TYPE_STRING, artist_keys },
+        { MIX_PROP_METADATA_ALBUM_STRING, SDL_PROPERTY_TYPE_STRING, album_keys},
+        { MIX_PROP_METADATA_COPYRIGHT_STRING, SDL_PROPERTY_TYPE_STRING, copyright_keys },
+        { MIX_PROP_METADATA_YEAR_NUMBER, SDL_PROPERTY_TYPE_NUMBER, year_keys },
     };
 
-    for (size_t i = 0; i < SDL_arraysize(tagmap_strings); i++) {
-        const char *mixer = tagmap_strings[i].mixer;
+    for (size_t i = 0; i < SDL_arraysize(tagmap); i++) {
+        const char *mixer = tagmap[i].mixer;
         if (!SDL_HasProperty(props, mixer)) {
             for (size_t j = 0; j < SDL_arraysize(title_keys); j++) {
-                const char *tag = tagmap_strings[i].tags[j];
-                if (SDL_HasProperty(props, tag)) {
-                    SDL_SetStringProperty(props, mixer, SDL_GetStringProperty(props, tag, NULL));
+                const char *str = SDL_GetStringProperty(props, tagmap[i].tags[j], NULL);
+                if (str) {
+                    if (tagmap[i].type == SDL_PROPERTY_TYPE_STRING) {
+                        SDL_SetStringProperty(props, mixer, str);
+                    } else if (tagmap[i].type == SDL_PROPERTY_TYPE_NUMBER) {
+                        char *endp = NULL;
+                        const Sint64 ivalue = (Sint64) SDL_strtoll(str, &endp, 10);
+                        if ((*str != '\0') && (*endp == '\0')) {  // if true, entire string was a valid number.
+                            SDL_SetNumberProperty(props, mixer, ivalue);
+                        }
+                    }
                     break;
                 }
             }
+        }
+    }
+
+    static const char * const tracknum_keys[] = { "SDL_mixer.metadata.id3v2.TRCK", "SDL_mixer.metadata.id3v2.TRK", "SDL_mixer.metadata.ape.track", "SDL_mixer.metadata.id3v1.track" };
+    for (size_t j = 0; j < SDL_arraysize(tracknum_keys); j++) {
+        Sint64 track, total_tracks;
+        ParseTrackNumString(SDL_GetStringProperty(props, tracknum_keys[j], NULL), &track, &total_tracks);
+        if (track > 0) {
+            SDL_SetNumberProperty(props, MIX_PROP_METADATA_TRACK_NUMBER, track);
+            if (total_tracks > 0) {
+                SDL_SetNumberProperty(props, MIX_PROP_METADATA_TOTAL_TRACKS_NUMBER, total_tracks);
+            }
+            break;
         }
     }
 
@@ -1188,7 +1268,11 @@ void MIX_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, 
         }
 
         char *generic_key = NULL;
-        if (SDL_asprintf(&generic_key, "SDL_mixer.metadata.ogg.%s", argument) > 0) {
+        const char *basekey = "SDL_mixer.metadata.ogg.";
+        if (SDL_asprintf(&generic_key, "%s%s", basekey, argument) > 0) {
+            for (char *ptr = generic_key + SDL_strlen(basekey); *ptr; ptr++) {
+                *ptr = SDL_tolower(*ptr);
+            }
             SDL_SetStringProperty(props, generic_key, value);
             SDL_free(generic_key);
         }
@@ -1209,7 +1293,24 @@ void MIX_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, 
             SDL_SetStringProperty(props, MIX_PROP_METADATA_ALBUM_STRING, value);
         } else if (SDL_strcasecmp(argument, "COPYRIGHT") == 0) {
             SDL_SetStringProperty(props, MIX_PROP_METADATA_COPYRIGHT_STRING, value);
+        } else if (SDL_strcasecmp(argument, "TRACKNUMBER") == 0) {
+            Sint64 track, total_tracks;
+            ParseTrackNumString(value, &track, &total_tracks);
+            if (track > 0) {
+                SDL_SetNumberProperty(props, MIX_PROP_METADATA_TRACK_NUMBER, track);
+                if (total_tracks > 0) {
+                    SDL_SetNumberProperty(props, MIX_PROP_METADATA_TOTAL_TRACKS_NUMBER, total_tracks);
+                }
+            }
+        } else if (SDL_strcasecmp(argument, "DATE") == 0) {
+            int year, month, day;
+            if (SDL_sscanf(value, "%d-%d-%d", &year, &month, &day) >= 1) {
+                if (year > 0) {
+                    SDL_SetNumberProperty(props, MIX_PROP_METADATA_YEAR_NUMBER, (Sint64) year);
+                }
+            }
         }
+
         SDL_free(param);
     }
 
