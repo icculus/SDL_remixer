@@ -19,7 +19,7 @@ jobs:
       id: sdl
       uses: libsdl-org/setup-sdl@v1
       with:
-        version: sdl3-latest
+        version: sdl3-head
     - name: Configure CMake
       run: cmake -B build ${{ matrix.platform.flags }}
     - name: Build
