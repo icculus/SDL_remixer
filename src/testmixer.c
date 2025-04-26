@@ -5,7 +5,7 @@
 
 //static SDL_Window *window = NULL;
 //static SDL_Renderer *renderer = NULL;
-static Mix_Track *track = NULL;
+static MIX_Track *track = NULL;
 
 static void LogMetadata(SDL_PropertiesID props, const char *name)
 {
@@ -79,34 +79,34 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 //    } else if (!SDL_CreateWindowAndRenderer("testmixer", 640, 480, 0, &window, &renderer)) {
 //        SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
 //        return SDL_APP_FAILURE;
-    } else if (!Mix_OpenMixer(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, NULL)) {
+    } else if (!MIX_OpenMixer(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, NULL)) {
         SDL_Log("Couldn't create mixer: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
 
 
     SDL_Log("Available decoders:");
-    const int num_decoders = Mix_GetNumAudioDecoders();
+    const int num_decoders = MIX_GetNumAudioDecoders();
     if (num_decoders < 0) {
         SDL_Log(" - [error (%s)]", SDL_GetError());
     } else if (num_decoders == 0) {
         SDL_Log(" - [none]");
     } else {
         for (int i = 0; i < num_decoders; i++) {
-            SDL_Log(" - %s", Mix_GetAudioDecoder(i));
+            SDL_Log(" - %s", MIX_GetAudioDecoder(i));
         }
     }
     SDL_Log("%s", "");
 
     const char *audiofname = argv[1];
-    Mix_Audio *audio = Mix_LoadAudio(audiofname, false);
+    MIX_Audio *audio = MIX_LoadAudio(audiofname, false);
     if (!audio) {
         SDL_Log("Failed to load audio: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
 
     SDL_Log("%s metadata:", audiofname);
-    SDL_PropertiesID props = Mix_GetAudioProperties(audio);
+    SDL_PropertiesID props = MIX_GetAudioProperties(audio);
     bool had_metadata = false;
     if (props) {
         MetadataKeys mkeys;
@@ -128,14 +128,14 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     }
     SDL_Log("%s", "");
 
-    track = Mix_CreateTrack();
-    //const int chmap[] = { 1, 0 }; Mix_SetTrackOutputChannelMap(track, chmap, SDL_arraysize(chmap));
-    Mix_SetTrackAudio(track, audio);
-    Mix_PlayTrack(track, Mix_TrackMSToFrames(track, 9440), 3, 0, Mix_TrackMSToFrames(track, 6097), Mix_TrackMSToFrames(track, 30000), Mix_TrackMSToFrames(track, 3000));
+    track = MIX_CreateTrack();
+    //const int chmap[] = { 1, 0 }; MIX_SetTrackOutputChannelMap(track, chmap, SDL_arraysize(chmap));
+    MIX_SetTrackAudio(track, audio);
+    MIX_PlayTrack(track, MIX_TrackMSToFrames(track, 9440), 3, 0, MIX_TrackMSToFrames(track, 6097), MIX_TrackMSToFrames(track, 30000), MIX_TrackMSToFrames(track, 3000));
 //Sint64 maxFrames, int loops, Sint64 startpos, Sint64 loop_start, Sint64 fadeIn, Sint64 append_silence_frames);
 
     // we cheat here with PlayAudio, since the sinewave decoder produces infinite audio.
-    //Mix_PlayAudio(Mix_CreateSineWaveAudio(300, 0.25f));
+    //MIX_PlayAudio(MIX_CreateSineWaveAudio(300, 0.25f));
 
     return SDL_APP_CONTINUE;
 }
@@ -159,18 +159,18 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     static float prev_ratio = 1.0f;
     if (ratio != prev_ratio) {
         SDL_Log("new frequency ratio: %f", ratio);
-        Mix_SetTrackFrequencyRatio(track, ratio);
+        MIX_SetTrackFrequencyRatio(track, ratio);
         prev_ratio = ratio;
     }
     #endif
 
-    return Mix_TrackPlaying(track) ? SDL_APP_CONTINUE : SDL_APP_SUCCESS;
+    return MIX_TrackPlaying(track) ? SDL_APP_CONTINUE : SDL_APP_SUCCESS;
 }
 
 void SDL_AppQuit(void *appstate, SDL_AppResult result)
 {
     // SDL will clean up the window/renderer for us.
     // SDL_mixer will clean up the tracks and audio.
-    Mix_CloseMixer();
+    MIX_CloseMixer();
 }
 

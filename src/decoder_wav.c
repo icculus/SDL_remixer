@@ -32,7 +32,7 @@ static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
         return false;
     }
 
-    *audio_userdata = Mix_RAW_InitFromMemoryBuffer(buffer, (size_t) buflen, spec, duration_frames, true);
+    *audio_userdata = MIX_RAW_InitFromMemoryBuffer(buffer, (size_t) buflen, spec, duration_frames, true);
     if (!*audio_userdata) {
         SDL_free(buffer);
         return false;
@@ -53,11 +53,11 @@ static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
             const Uint32 nextchunkpos = SDL_TellIO(io) + chunklen;
 
             if ((chunk == ID3_) || (chunk == id3_)) {
-                Mix_IoClamp clamp;
-                SDL_IOStream *clamped_io = Mix_OpenIoClamp(&clamp, io);
+                MIX_IoClamp clamp;
+                SDL_IOStream *clamped_io = MIX_OpenIoClamp(&clamp, io);
                 if (clamped_io) {
                     clamp.length = chunklen;
-                    Mix_ReadMetadataTags(clamped_io, props, &clamp);
+                    MIX_ReadMetadataTags(clamped_io, props, &clamp);
                     SDL_CloseIO(clamped_io);
                 }
                 break;
@@ -72,15 +72,15 @@ static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
     return true;
 }
 
-Mix_Decoder Mix_Decoder_WAV = {
+MIX_Decoder MIX_Decoder_WAV = {
     "WAV",
     NULL,  // init
     WAV_init_audio,
-    Mix_RAW_init_track,
-    Mix_RAW_decode,
-    Mix_RAW_seek,
-    Mix_RAW_quit_track,
-    Mix_RAW_quit_audio,
+    MIX_RAW_init_track,
+    MIX_RAW_decode,
+    MIX_RAW_seek,
+    MIX_RAW_quit_track,
+    MIX_RAW_quit_audio,
     NULL  // quit
 };
 

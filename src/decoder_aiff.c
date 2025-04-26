@@ -22,7 +22,7 @@
 /*
   This is the source needed to decode an AIFF file into a waveform.
   It's pretty straightforward once you get going. The only
-  externally-callable function is Mix_LoadAIFF_IO(), which is meant to
+  externally-callable function is MIX_LoadAIFF_IO(), which is meant to
   act as identically to SDL_LoadWAV_IO() as possible.
 
   This file by TorbjÃÂ¶rn Andersson (torbjorn.andersson@eurotime.se)
@@ -225,7 +225,7 @@ static bool SDLCALL AIFF_init_audio(SDL_IOStream *src, SDL_AudioSpec *spec, SDL_
         return false;
     }
 
-    *audio_userdata = Mix_RAW_InitFromMemoryBuffer(buffer, buflen, spec, duration_frames, true);
+    *audio_userdata = MIX_RAW_InitFromMemoryBuffer(buffer, buflen, spec, duration_frames, true);
     if (!*audio_userdata) {
         SDL_free(buffer);
         return false;
@@ -236,15 +236,15 @@ static bool SDLCALL AIFF_init_audio(SDL_IOStream *src, SDL_AudioSpec *spec, SDL_
 
 
 // AIFF_init_audio parses metadata and finds the payload, and then it's just raw PCM data.
-Mix_Decoder Mix_Decoder_AIFF = {
+MIX_Decoder MIX_Decoder_AIFF = {
     "AIFF",
     NULL, // init
     AIFF_init_audio,
-    Mix_RAW_init_track,
-    Mix_RAW_decode,
-    Mix_RAW_seek,
-    Mix_RAW_quit_track,
-    Mix_RAW_quit_audio,
+    MIX_RAW_init_track,
+    MIX_RAW_decode,
+    MIX_RAW_seek,
+    MIX_RAW_quit_track,
+    MIX_RAW_quit_audio,
     NULL  // quit
 };
 

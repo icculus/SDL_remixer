@@ -621,7 +621,7 @@ void SDLCALL WAVPACK_quit_audio(void *audio_userdata)
     SDL_free(d);
 }
 
-Mix_Decoder Mix_Decoder_WAVPACK = {
+MIX_Decoder MIX_Decoder_WAVPACK = {
     "WAVPACK",
     WAVPACK_init,
     WAVPACK_init_audio,

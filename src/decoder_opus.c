@@ -189,7 +189,7 @@ static bool SDLCALL OPUS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
 
     const OpusTags *tags = opus.op_tags(of, -1);
     if (tags != NULL) {
-        Mix_ParseOggComments(props, spec->freq, tags->vendor, (const char * const *) tags->user_comments, tags->comments, &payload->loop_start, &payload->loop_end, &payload->loop_len);
+        MIX_ParseOggComments(props, spec->freq, tags->vendor, (const char * const *) tags->user_comments, tags->comments, &payload->loop_start, &payload->loop_end, &payload->loop_len);
     }
 
     opus.op_raw_seek(of, 0);  // !!! FIXME: it's not clear if this seek is necessary, but https://stackoverflow.com/a/72482773 suggests it might be, at least on older libvorbisfile releases...
@@ -293,7 +293,7 @@ void SDLCALL OPUS_quit_audio(void *audio_userdata)
     SDL_free(d);
 }
 
-Mix_Decoder Mix_Decoder_OPUS = {
+MIX_Decoder MIX_Decoder_OPUS = {
     "OPUS",
     OPUS_init,
     OPUS_init_audio,

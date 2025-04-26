@@ -161,7 +161,7 @@ static bool SDLCALL DRFLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
         return false;
     }
 
-    Mix_ParseOggComments(props, (int) decoder->sampleRate, metadata.vendor, (const char * const *) metadata.comments, metadata.num_comments, &payload->loop_start, &payload->loop_end, &payload->loop_len);
+    MIX_ParseOggComments(props, (int) decoder->sampleRate, metadata.vendor, (const char * const *) metadata.comments, metadata.num_comments, &payload->loop_start, &payload->loop_end, &payload->loop_len);
     FreeMetadata(&metadata);
 
     spec->format = SDL_AUDIO_F32;
@@ -237,7 +237,7 @@ static void SDLCALL DRFLAC_quit_audio(void *audio_userdata)
     SDL_free(payload);
 }
 
-Mix_Decoder Mix_Decoder_DRFLAC = {
+MIX_Decoder MIX_Decoder_DRFLAC = {
     "DRFLAC",
     NULL,  // init
     DRFLAC_init_audio,

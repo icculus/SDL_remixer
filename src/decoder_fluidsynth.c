@@ -330,7 +330,7 @@ bool SDLCALL FLUIDSYNTH_seek(void *userdata, Uint64 frame)
     return SDL_Unsupported();
 #else
     FLUIDSYNTH_UserData *d = (FLUIDSYNTH_UserData *) userdata;
-    const int ticks = (int) Mix_FramesToMS(d->freq, frame);
+    const int ticks = (int) MIX_FramesToMS(d->freq, frame);
 
     // !!! FIXME: docs say this will fail if a seek was requested and then a second seek happens before we play more of the midi file, since the first seek will still be in progress.
     return (fluidsynth.fluid_player_seek(d->player, ticks) == FLUID_OK);
@@ -355,7 +355,7 @@ void SDLCALL FLUIDSYNTH_quit_audio(void *audio_userdata)
     SDL_free(d);
 }
 
-Mix_Decoder Mix_Decoder_FLUIDSYNTH = {
+MIX_Decoder MIX_Decoder_FLUIDSYNTH = {
     "FLUIDSYNTH",
     FLUIDSYNTH_init,
     FLUIDSYNTH_init_audio,

@@ -409,7 +409,7 @@ void SDLCALL MPG123_quit_audio(void *audio_userdata)
     SDL_free(d);
 }
 
-Mix_Decoder Mix_Decoder_MPG123 = {
+MIX_Decoder MIX_Decoder_MPG123 = {
     "MPG123",
     MPG123_init,
     MPG123_init_audio,

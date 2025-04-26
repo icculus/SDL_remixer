@@ -382,7 +382,7 @@ static bool SDLCALL VOC_init_audio(SDL_IOStream *src, SDL_AudioSpec *spec, SDL_P
         fillptr = ptr + (buflen - v.rest);
     }
 
-    *audio_userdata = Mix_RAW_InitFromMemoryBuffer(buffer, buflen, spec, duration_frames, true);
+    *audio_userdata = MIX_RAW_InitFromMemoryBuffer(buffer, buflen, spec, duration_frames, true);
     if (!*audio_userdata) {
         SDL_free(buffer);
         return false;
@@ -395,15 +395,15 @@ static bool SDLCALL VOC_init_audio(SDL_IOStream *src, SDL_AudioSpec *spec, SDL_P
 // !!! FIXME:  it predecodes all audio upfront. VOC files were small and uncomplex (and rare in modern times), so this
 // !!! FIXME:  isn't a big deal, but SDL_sound's VOC decoder can decode VOCs on the fly, so it might be worth stealing
 // !!! FIXME:  that implementation later.
-Mix_Decoder Mix_Decoder_VOC = {
+MIX_Decoder MIX_Decoder_VOC = {
     "VOC",
     NULL, // init
     VOC_init_audio,
-    Mix_RAW_init_track,
-    Mix_RAW_decode,
-    Mix_RAW_seek,
-    Mix_RAW_quit_track,
-    Mix_RAW_quit_audio,
+    MIX_RAW_init_track,
+    MIX_RAW_decode,
+    MIX_RAW_seek,
+    MIX_RAW_quit_track,
+    MIX_RAW_quit_audio,
     NULL  // quit
 };
 

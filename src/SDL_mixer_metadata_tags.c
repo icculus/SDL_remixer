@@ -896,7 +896,7 @@ static Sint64 get_musicmatch_len(SDL_IOStream *io)
 #define TAG_INVALID    -1
 #define TAG_NOT_FOUND   0
 
-static int probe_id3v1(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, int atend, Mix_IoClamp *clamp)
+static int probe_id3v1(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, int atend, MIX_IoClamp *clamp)
 {
     if (SDL_SeekIO(io, -ID3v1_TAG_SIZE, SDL_IO_SEEK_END) == -1) {
         return TAG_INVALID;
@@ -919,7 +919,7 @@ static int probe_id3v1(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, int
     return TAG_NOT_FOUND;
 }
 
-static int probe_mmtag(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, Mix_IoClamp *clamp)
+static int probe_mmtag(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, MIX_IoClamp *clamp)
 {
     (void)props; // !!! FIXME: Implement reading tag contents.
     if (SDL_SeekIO(io, -MUSICMATCH_FOOTER_SIZE, SDL_IO_SEEK_END) == -1) {
@@ -937,7 +937,7 @@ static int probe_mmtag(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, Mix
     return TAG_NOT_FOUND;
 }
 
-static int probe_apetag(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, Mix_IoClamp *clamp)
+static int probe_apetag(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, MIX_IoClamp *clamp)
 {
     // APE tag may be at the end: read the footer
     if (SDL_SeekIO(io, -APE_HEADER_SIZE, SDL_IO_SEEK_END) == -1) {
@@ -974,7 +974,7 @@ static int probe_apetag(SDL_PropertiesID props, SDL_IOStream *io, Uint8 *buf, Mi
     return retval;
 }
 
-static int probe_lyrics3(SDL_IOStream *io, Uint8 *buf, Mix_IoClamp *clamp)
+static int probe_lyrics3(SDL_IOStream *io, Uint8 *buf, MIX_IoClamp *clamp)
 {
     if (SDL_SeekIO(io, -LYRICS3_FOOTER_SIZE, SDL_IO_SEEK_END) == -1) {
         return TAG_INVALID;
@@ -1014,7 +1014,7 @@ static int probe_lyrics3(SDL_IOStream *io, Uint8 *buf, Mix_IoClamp *clamp)
 // !!! FIXME: as it stands, SDL_mixer ignores this return value and just accepts any new clamps
 // !!! FIXME:  and properties. If there was a legit i/o error, it's going to find it shortly
 // !!! FIXME:  as it tries to read the audio data anyhow.
-bool Mix_ReadMetadataTags(SDL_IOStream *io, SDL_PropertiesID props, Mix_IoClamp *clamp)
+bool MIX_ReadMetadataTags(SDL_IOStream *io, SDL_PropertiesID props, MIX_IoClamp *clamp)
 {
     Uint8 buf[TAGS_INPUT_BUFFER_SIZE];
 
@@ -1161,7 +1161,7 @@ static Sint64 ParseOggTime(char *time, long samplerate_hz)
     return (result * 60 + val) * samplerate_hz;
 }
 
-void Mix_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, const char * const *user_comments, int num_comments, Sint64 *loop_start, Sint64 *loop_end, Sint64 *loop_len)
+void MIX_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, const char * const *user_comments, int num_comments, Sint64 *loop_start, Sint64 *loop_end, Sint64 *loop_len)
 {
     if (vendor && *vendor) {
         SDL_SetStringProperty(props, "SDL_mixer.metadata.ogg.vendor", vendor);

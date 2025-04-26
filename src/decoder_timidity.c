@@ -100,7 +100,7 @@ static bool SDLCALL TIMIDITY_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, S
     if (iomem) {
         song = Timidity_LoadSong(iomem, spec);
         if (song) {  // !!! FIXME: this is just to verify Timidity likes this file, but it's not strictly necessary.
-            song_length_in_frames = Mix_MSToFrames(spec->freq, Timidity_GetSongLength(song));
+            song_length_in_frames = MIX_MSToFrames(spec->freq, Timidity_GetSongLength(song));
             Timidity_FreeSong(song);
         }
         SDL_CloseIO(iomem);
@@ -175,7 +175,7 @@ bool SDLCALL TIMIDITY_decode(void *userdata, SDL_AudioStream *stream)
 bool SDLCALL TIMIDITY_seek(void *userdata, Uint64 frame)
 {
     TIMIDITY_UserData *d = (TIMIDITY_UserData *) userdata;
-    const Uint32 ticks = (Uint32) Mix_FramesToMS(d->freq, frame);
+    const Uint32 ticks = (Uint32) MIX_FramesToMS(d->freq, frame);
     Timidity_Seek(d->song, ticks);  // !!! FIXME: this returns void, what happens if we seek past EOF?
     return true;
 }
@@ -195,7 +195,7 @@ void SDLCALL TIMIDITY_quit_audio(void *audio_userdata)
     SDL_free(d);
 }
 
-Mix_Decoder Mix_Decoder_TIMIDITY = {
+MIX_Decoder MIX_Decoder_TIMIDITY = {
     "TIMIDITY",
     TIMIDITY_init,
     TIMIDITY_init_audio,

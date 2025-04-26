@@ -120,7 +120,7 @@ static bool SDLCALL GME_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
         if ((info->intro_length >= 0) && (info->loop_length > 0)) {
             *duration_frames = MIX_DURATION_INFINITE;
         } else if (info->length >= 0) {
-            *duration_frames = (Sint64) Mix_MSToFrames(spec->freq, info->length);
+            *duration_frames = (Sint64) MIX_MSToFrames(spec->freq, info->length);
         }
 
         gme.gme_free_info(info);
@@ -223,7 +223,7 @@ void SDLCALL GME_quit_audio(void *audio_userdata)
     SDL_free(d);
 }
 
-Mix_Decoder Mix_Decoder_GME = {
+MIX_Decoder MIX_Decoder_GME = {
     "GME",
     GME_init,
     GME_init_audio,

@@ -208,7 +208,7 @@ static bool SDLCALL VORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
 
     vorbis_comment *vc = vorbis.ov_comment(&vf, -1);
     if (vc != NULL) {
-        Mix_ParseOggComments(props, spec->freq, vc->vendor, (const char * const *) vc->user_comments, vc->comments, &payload->loop_start, &payload->loop_end, &payload->loop_len);
+        MIX_ParseOggComments(props, spec->freq, vc->vendor, (const char * const *) vc->user_comments, vc->comments, &payload->loop_start, &payload->loop_end, &payload->loop_len);
     }
 
     vorbis.ov_raw_seek(&vf, 0);  // !!! FIXME: it's not clear if this seek is necessary, but https://stackoverflow.com/a/72482773 suggests it might be, at least on older libvorbisfile releases...
@@ -327,7 +327,7 @@ void SDLCALL VORBIS_quit_audio(void *audio_userdata)
     SDL_free(d);
 }
 
-Mix_Decoder Mix_Decoder_VORBIS = {
+MIX_Decoder MIX_Decoder_VORBIS = {
     "VORBIS",
     VORBIS_init,
     VORBIS_init_audio,
