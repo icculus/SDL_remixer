@@ -57,6 +57,7 @@ static SDL_PropertiesID track_tags = 0;
 static Mix_Track *all_tracks = NULL;
 static Mix_Track *fire_and_forget_pool = NULL;  // these are also listed in all_tracks.
 static Mix_Audio *all_audios = NULL;
+static SDL_Mutex *mixer_sync_lock = NULL;
 
 static bool CheckInitialized(void)
 {
@@ -108,6 +109,7 @@ static bool CheckTrackTagParam(Mix_Track *track, const char *tag)
     return true;
 }
 
+// this protects global mixer state, like linked lists of the Mix_Tracks.
 static void LockMixerState(void)
 {
     // this is just a convenient lock to protect mixer state, but this doesn't specifically have anything to do with tags.
@@ -119,6 +121,28 @@ static void UnlockMixerState(void)
     // this is just a convenient lock to protect mixer state, but this doesn't specifically have anything to do with tags.
     SDL_UnlockProperties(track_tags);
 }
+
+// this makes sure the mixer is not mixing at this very moment, so you can change multiple tracks atomically.
+static void LockMixerSync(void)
+{
+    SDL_LockMutex(mixer_sync_lock);
+}
+
+static void UnlockMixerSync(void)
+{
+    SDL_UnlockMutex(mixer_sync_lock);
+}
+
+static void SDLCALL AudioIterationStart(void *userdata, SDL_AudioDeviceID devid, bool start)
+{
+    LockMixerSync();
+}
+
+static void SDLCALL AudioIterationEnd(void *userdata, SDL_AudioDeviceID devid, bool start)
+{
+    UnlockMixerSync();
+}
+
 
 // this assumes LockTrack(track) was called before this.
 static void TrackFinished(Mix_Track *track)
@@ -380,31 +404,52 @@ bool Mix_OpenMixer(SDL_AudioDeviceID devid, const SDL_AudioSpec *spec)
         return SDL_SetError("Audio is already open");
     }
 
+    // This calls SDL_Init(SDL_INIT_AUDIO) for each open, because SDL initialization is reference-counted.
+    if (!SDL_Init(SDL_INIT_AUDIO)) {
+        return false;
+    }
+
+    SDL_assert(!audio_device);
+    audio_device = SDL_OpenAudioDevice(devid, spec);
+    if (!audio_device) {
+        goto failed;
+    }
+
     // !!! FIXME: if we allow multiple opens, only the first one should init decoders.
     InitDecoders();
 
     SDL_assert(!track_tags);
-    const SDL_PropertiesID tags = SDL_CreateProperties();
-    if (!tags) {
-        return false;
+    track_tags = SDL_CreateProperties();
+    if (!track_tags) {
+        goto failed;
     }
 
-    // This calls SDL_Init(SDL_INIT_AUDIO) for each open, because SDL initialization is reference-counted.
-    if (!SDL_Init(SDL_INIT_AUDIO)) {
-        SDL_DestroyProperties(tags);
-        return false;
+    SDL_assert(!mixer_sync_lock);
+    mixer_sync_lock = SDL_CreateMutex();
+    if (!mixer_sync_lock) {
+        goto failed;
     }
 
-    audio_device = SDL_OpenAudioDevice(devid, spec);
-    if (!audio_device) {
-        SDL_QuitSubSystem(SDL_INIT_AUDIO);
-        SDL_DestroyProperties(tags);
-        return false;
+    if (!SDL_SetAudioIterationCallbacks(audio_device, AudioIterationStart, AudioIterationEnd, NULL)) {
+        goto failed;
     }
-
-    track_tags = tags;
 
     return true;
+
+failed:
+    if (audio_device) {
+        SDL_CloseAudioDevice(audio_device);
+        audio_device = 0;
+    }
+
+    if (track_tags) {
+        SDL_DestroyProperties(track_tags);
+        track_tags = 0;
+    }
+
+    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    return false;
+
 }
 
 void Mix_CloseMixer(void)
@@ -427,6 +472,8 @@ void Mix_CloseMixer(void)
         SDL_QuitSubSystem(SDL_INIT_AUDIO);
         SDL_DestroyProperties(track_tags);
         track_tags = 0;
+        SDL_DestroyMutex(mixer_sync_lock);
+        mixer_sync_lock = NULL;
 
         QuitDecoders();  // !!! FIXME: if we allow multiple opens, the last one to close should call this. Or we could re-add Mix_Init().
     }
@@ -1355,13 +1402,13 @@ bool Mix_HaltAllTracks(Sint64 fadeOut)
         return false;
     }
 
-    LockMixerState();
+    LockMixerSync();
 
     for (Mix_Track *track = all_tracks; track != NULL; track = track->next) {
         HaltTrack(track, (fadeOut > 0) ? Mix_TrackMSToFrames(track, fadeOut) : -1);
     }
 
-    UnlockMixerState();
+    UnlockMixerSync();
 
     return true;
 }
@@ -1413,13 +1460,13 @@ bool Mix_PauseAllTracks(void)
         return false;
     }
 
-    LockMixerState();
+    LockMixerSync();
 
     for (Mix_Track *track = all_tracks; track != NULL; track = track->next) {
         PauseTrack(track);
     }
 
-    UnlockMixerState();
+    UnlockMixerSync();
 
     return true;
 }
@@ -1435,6 +1482,7 @@ bool Mix_PauseTag(const char *tag)
         return true;  // nothing is using this tag, do nothing (but not an error).
     }
 
+    LockMixerSync();
     SDL_LockRWLockForReading(list->rwlock);
 
     const size_t total = list->num_tracks;
@@ -1443,6 +1491,7 @@ bool Mix_PauseTag(const char *tag)
     }
 
     SDL_UnlockRWLock(list->rwlock);
+    UnlockMixerSync();
 
     return true;
 }
@@ -1471,13 +1520,13 @@ bool Mix_ResumeAllTracks(void)
         return false;
     }
 
-    LockMixerState();
+    LockMixerSync();
 
     for (Mix_Track *track = all_tracks; track != NULL; track = track->next) {
         ResumeTrack(track);
     }
 
-    UnlockMixerState();
+    UnlockMixerSync();
     return true;
 }
 
@@ -1492,6 +1541,7 @@ bool Mix_ResumeTag(const char *tag)
         return true;  // nothing is using this tag, do nothing (but not an error).
     }
 
+    LockMixerSync();
     SDL_LockRWLockForReading(list->rwlock);
 
     const size_t total = list->num_tracks;
@@ -1500,6 +1550,7 @@ bool Mix_ResumeTag(const char *tag)
     }
 
     SDL_UnlockRWLock(list->rwlock);
+    UnlockMixerSync();
 
     return true;
 }
@@ -1608,6 +1659,7 @@ bool Mix_SetTagGain(const char *tag, float gain)
         return true;  // nothing is using this tag, do nothing (but not an error).
     }
 
+    LockMixerSync();
     SDL_LockRWLockForReading(list->rwlock);
 
     const size_t total = list->num_tracks;
@@ -1616,6 +1668,7 @@ bool Mix_SetTagGain(const char *tag, float gain)
     }
 
     SDL_UnlockRWLock(list->rwlock);
+    UnlockMixerSync();
 
     return true;;
 }
