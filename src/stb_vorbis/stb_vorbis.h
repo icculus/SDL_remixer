@@ -645,7 +645,7 @@ enum STBVorbisError
 #define MAX_BLOCKSIZE_LOG  13   // from specification
 #define MAX_BLOCKSIZE      (1 << MAX_BLOCKSIZE_LOG)
 
-#ifndef STB_VORBIS_STDINT_DEFINED
+#ifndef STB_VORBIS_STDINT_DEFINED /* for using SDL types */
 typedef unsigned char  uint8;
 typedef   signed char   int8;
 typedef unsigned short uint16;
@@ -1423,8 +1423,6 @@ static int getn(vorb *z, uint8 *data, int n)
    #endif
 }
 
-static int set_file_offset(stb_vorbis *f, unsigned int loc);
-
 static void skip(vorb *z, int n)
 {
    if (USE_MEMORY(z)) {
@@ -1432,7 +1430,6 @@ static void skip(vorb *z, int n)
       if (z->stream >= z->stream_end) z->eof = 1;
       return;
    }
-
    #ifndef STB_VORBIS_NO_STDIO
    {
       long x = ftell(z->f);
@@ -1447,7 +1444,6 @@ static int set_file_offset(stb_vorbis *f, unsigned int loc)
    if (f->push_mode) return 0;
    #endif
    f->eof = 0;
-
    if (USE_MEMORY(f)) {
       if (f->stream_start + loc >= f->stream_end || f->stream_start + loc < f->stream_start) {
          f->stream = f->stream_end;
@@ -1458,7 +1454,6 @@ static int set_file_offset(stb_vorbis *f, unsigned int loc)
          return 1;
       }
    }
-
    #ifndef STB_VORBIS_NO_STDIO
    if (loc + f->f_start < loc || loc >= 0x80000000) {
       loc = 0x7fffffff;
