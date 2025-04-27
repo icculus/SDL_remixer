@@ -98,10 +98,10 @@ static void SDLCALL VORBIS_quit(void)
     UnloadModule_vorbis();
 }
 
-static bool set_ov_error(const char *function, int error)
+static bool SetOggVorbisError(const char *function, int error)
 {
-    #define HANDLE_ERROR_CASE(X) case X: return SDL_SetError("%s: %s", function, #X)
     switch (error) {
+        #define HANDLE_ERROR_CASE(X) case X: return SDL_SetError("%s: %s", function, #X)
         HANDLE_ERROR_CASE(OV_FALSE);
         HANDLE_ERROR_CASE(OV_EOF);
         HANDLE_ERROR_CASE(OV_HOLE);
@@ -116,8 +116,8 @@ static bool set_ov_error(const char *function, int error)
         HANDLE_ERROR_CASE(OV_EBADPACKET);
         HANDLE_ERROR_CASE(OV_EBADLINK);
         HANDLE_ERROR_CASE(OV_ENOSEEK);
-    #undef HANDLE_ERROR_CASE
-    default: break;
+        #undef HANDLE_ERROR_CASE
+        default: break;
     }
     return SDL_SetError("%s: unknown error %d", function, error);
 }
@@ -190,7 +190,7 @@ static bool SDLCALL VORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
         SDL_CloseIO(io);
         SDL_free(data);
         SDL_free(payload);
-        return set_ov_error("ov_open_callbacks", rc);
+        return SetOggVorbisError("ov_open_callbacks", rc);
     }
 
     const vorbis_info *vi = vorbis.ov_info(&vf, -1);
@@ -243,7 +243,7 @@ bool SDLCALL VORBIS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, 
     if (rc < 0) {
         SDL_CloseIO(d->io);
         SDL_free(d);
-        return set_ov_error("ov_open_callbacks", rc);
+        return SetOggVorbisError("ov_open_callbacks", rc);
     }
 
     d->current_channels = spec->channels;
@@ -268,13 +268,13 @@ bool SDLCALL VORBIS_decode(void *userdata, SDL_AudioStream *stream)
     Uint8 samples[256];
     const int amount = (int)vorbis.ov_read(&d->vf, samples, sizeof (samples), &bitstream);
     if (amount < 0) {
-        return set_ov_error("ov_read", amount);
+        return SetOggVorbisError("ov_read", amount);
     }
 #else
     float **pcm_channels = NULL;
     const int amount = (int)vorbis.ov_read_float(&d->vf, &pcm_channels, 256, &bitstream);
     if (amount < 0) {
-        return set_ov_error("ov_read_float", amount);
+        return SetOggVorbisError("ov_read_float", amount);
     }
 #endif
 
@@ -309,7 +309,7 @@ bool SDLCALL VORBIS_seek(void *userdata, Uint64 frame)
     VORBIS_UserData *d = (VORBIS_UserData *) userdata;
     // !!! FIXME: I assume ov_raw_seek is faster if we're seeking to start, but I could be wrong.
     const int rc = (frame == 0) ? vorbis.ov_raw_seek(&d->vf, 0) : vorbis.ov_pcm_seek(&d->vf, (ogg_int64_t) frame);
-    return (rc == 0) ? true : set_ov_error("ov_pcm_seek", rc);
+    return (rc == 0) ? true : SetOggVorbisError("ov_pcm_seek", rc);
 }
 
 void SDLCALL VORBIS_quit_track(void *userdata)
