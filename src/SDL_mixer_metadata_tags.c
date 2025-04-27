@@ -130,9 +130,9 @@ static void parse_id3v1(SDL_PropertiesID props, const Uint8 *buffer)
     id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.year",    buffer + ID3v1_FIELD_YEAR, ID3v1_SIZE_OF_YEAR_FIELD);
 
     if (has_tracknum) {
-        char str[8];
+        char str[12];
         SDL_snprintf(str, sizeof (str), "%u", (unsigned int) buffer[ID3v1_FIELD_TRACK+1]);
-        id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.track", str, SDL_strlen(str));
+        id3v1_set_tag(props, "SDL_mixer.metadata.id3v1.track", (Uint8 *) str, SDL_strlen(str));
     }
 }
 
