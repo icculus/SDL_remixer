@@ -28,6 +28,7 @@ static const MIX_Decoder *decoders[] = {
     &MIX_Decoder_WAV,
     &MIX_Decoder_AIFF,
     &MIX_Decoder_VORBIS,
+    &MIX_Decoder_STBVORBIS,
     &MIX_Decoder_OPUS,
     &MIX_Decoder_FLAC,
     &MIX_Decoder_DRFLAC,

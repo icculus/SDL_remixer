@@ -137,6 +137,7 @@ extern MIX_Decoder MIX_Decoder_AIFF;
 extern MIX_Decoder MIX_Decoder_MPG123;
 extern MIX_Decoder MIX_Decoder_DRMP3;
 extern MIX_Decoder MIX_Decoder_VORBIS;
+extern MIX_Decoder MIX_Decoder_STBVORBIS;
 extern MIX_Decoder MIX_Decoder_OPUS;
 extern MIX_Decoder MIX_Decoder_FLAC;
 extern MIX_Decoder MIX_Decoder_DRFLAC;

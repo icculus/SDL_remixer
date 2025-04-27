@@ -37,6 +37,7 @@ add_library(SDL_remixer STATIC
     src/decoder_sinewave.c
     src/decoder_voc.c
     src/decoder_vorbis.c
+    src/decoder_stb_vorbis.c
     src/decoder_wav.c
     src/decoder_wavpack.c
     src/decoder_timidity.c
