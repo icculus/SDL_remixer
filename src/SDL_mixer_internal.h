@@ -145,6 +145,7 @@ extern MIX_Decoder MIX_Decoder_TIMIDITY;
 extern MIX_Decoder MIX_Decoder_FLUIDSYNTH;
 extern MIX_Decoder MIX_Decoder_WAVPACK;
 extern MIX_Decoder MIX_Decoder_GME;
+extern MIX_Decoder MIX_Decoder_XMP;
 extern MIX_Decoder MIX_Decoder_SINEWAVE;
 extern MIX_Decoder MIX_Decoder_RAW;
 

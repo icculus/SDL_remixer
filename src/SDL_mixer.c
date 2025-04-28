@@ -36,6 +36,7 @@ static const MIX_Decoder *decoders[] = {
     &MIX_Decoder_FLUIDSYNTH,
     &MIX_Decoder_WAVPACK,
     &MIX_Decoder_GME,
+    &MIX_Decoder_XMP,
     &MIX_Decoder_MPG123,
     &MIX_Decoder_DRMP3,
     &MIX_Decoder_SINEWAVE,
