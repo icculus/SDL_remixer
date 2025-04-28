@@ -193,8 +193,7 @@ bool SDLCALL GME_decode(void *userdata, SDL_AudioStream *stream)
     Sint16 samples[256];
     gme_err_t err = gme.gme_play(d->emu, SDL_arraysize(samples), (short*) samples);
     if (err != NULL) {
-        SDL_SetError("GME: %s", err);
-        return false;  // i guess we're done.
+        return SDL_SetError("GME: %s", err);  // i guess we're done.
     }
 
     SDL_PutAudioStreamData(stream, samples, sizeof (samples));
