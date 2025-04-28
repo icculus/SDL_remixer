@@ -995,12 +995,18 @@ bool MIX_SetTrackAudio(MIX_Track *track, MIX_Audio *audio)
     }
 
     SDL_AudioSpec spec;
-    SDL_copyp(&spec, &audio->spec);
+    if (audio) {
+        SDL_copyp(&spec, &audio->spec);
+    } else {
+        // make this reasonable, but in theory we shouldn't touch it again.
+        spec.freq = 44100;
+        spec.channels = 2;
+    }
     spec.format = SDL_AUDIO_F32;  // we always work in float32.
 
     LockTrack(track);
 
-    if (track->internal_stream == NULL) {
+    if (audio && (track->internal_stream == NULL)) {
         track->internal_stream = SDL_CreateAudioStream(&audio->spec, &spec);
         if (!track->internal_stream) {
             UnlockTrack(track);
