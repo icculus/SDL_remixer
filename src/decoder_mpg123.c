@@ -200,7 +200,6 @@ static bool SDLCALL MPG123_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
              !SDL_HasProperty(props, "SDL_mixer.metadata.id3v2.TIT2") &&
              !SDL_HasProperty(props, "SDL_mixer.metadata.id3v2.TT2") ) {
 
-            #if 1
             Uint8 maybe_frame_header[4];
             if (SDL_ReadIO(io, maybe_frame_header, sizeof (maybe_frame_header)) != sizeof (maybe_frame_header)) {
                 return false;
@@ -209,25 +208,6 @@ static bool SDLCALL MPG123_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
             } else if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {  // roll back and let mpg123 have it all.
                 return false;
             }
-            #else
-            Uint8 maybe_frame_header[128];
-            if (SDL_ReadIO(io, maybe_frame_header, sizeof (maybe_frame_header)) != sizeof (maybe_frame_header)) {
-                return false;
-            }
-
-            bool found = false;
-            for (int i = 0; i < sizeof (maybe_frame_header) - 4; i++) {
-                if ((found = IsMp3Header(&maybe_frame_header[i]))) {
-                    break;
-                }
-            }
-
-            if (!found) {
-                return SDL_SetError("mpg123: (Probably) not MPEG audio data");
-            } else if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {  // roll back and let mpg123 have it all.
-                return false;
-            }
-            #endif
         }
     }
 
