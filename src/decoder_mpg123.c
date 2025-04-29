@@ -167,8 +167,70 @@ static const char *mpg_err(mpg123_handle* mpg, int result)
 }
 
 
+// stolen from dr_mp3's drmp3_hdr_valid() function.
+static int IsMp3Header(const Uint8 *h)
+{
+    #define MP3_HDR_GET_LAYER(h)            (((h[1]) >> 1) & 3)
+    #define MP3_HDR_GET_BITRATE(h)          ((h[2]) >> 4)
+    #define MP3_HDR_GET_SAMPLE_RATE(h)      (((h[2]) >> 2) & 3)
+    return h[0] == 0xff && ((h[1] & 0xF0) == 0xf0 || (h[1] & 0xFE) == 0xe2) &&
+        (MP3_HDR_GET_LAYER(h) != 0) &&
+        (MP3_HDR_GET_BITRATE(h) != 15) &&
+        (MP3_HDR_GET_SAMPLE_RATE(h) != 3);
+    #undef MP3_HDR_GET_LAYER
+    #undef MP3_HDR_GET_BITRATE
+    #undef MP3_HDR_GET_SAMPLE_RATE
+}
+
+
 static bool SDLCALL MPG123_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
+    // libmpg123 will accept almost any binary data and try to treat it as MPEG audio, which causes
+    //  problems. Sometimes it will reject invalid data, but it appears to accept lots of things that
+    //  are definitely not MPEG audio.
+    // To limit it from accepting things that aren't MP3s, we do an extremely simple check to see if we
+    //  see something kinda like a valid MPEG frame header at the start.
+    // If this decoder was explicitly requested, we skip this check and let libmpg123 run with anything it
+    //  thinks it can (overconfidently) handle.
+    const char *decoder_name = SDL_GetStringProperty(props, MIX_PROP_AUDIO_DECODER_STRING, NULL);
+    const bool accept_anything = decoder_name && (SDL_strcasecmp(decoder_name, "MPG123") == 0);
+    if (!accept_anything) {
+        // if it has an ID3 tag, we'll assume it's worth trying without further tests.
+        if ( !SDL_HasProperty(props, "SDL_mixer.metadata.id3v1.title") &&
+             !SDL_HasProperty(props, "SDL_mixer.metadata.id3v2.TIT2") &&
+             !SDL_HasProperty(props, "SDL_mixer.metadata.id3v2.TT2") ) {
+
+            #if 1
+            Uint8 maybe_frame_header[4];
+            if (SDL_ReadIO(io, maybe_frame_header, sizeof (maybe_frame_header)) != sizeof (maybe_frame_header)) {
+                return false;
+            } else if (!IsMp3Header(maybe_frame_header)) {
+                return SDL_SetError("mpg123: (Probably) not MPEG audio data");
+            } else if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {  // roll back and let mpg123 have it all.
+                return false;
+            }
+            #else
+            Uint8 maybe_frame_header[128];
+            if (SDL_ReadIO(io, maybe_frame_header, sizeof (maybe_frame_header)) != sizeof (maybe_frame_header)) {
+                return false;
+            }
+
+            bool found = false;
+            for (int i = 0; i < sizeof (maybe_frame_header) - 4; i++) {
+                if ((found = IsMp3Header(&maybe_frame_header[i]))) {
+                    break;
+                }
+            }
+
+            if (!found) {
+                return SDL_SetError("mpg123: (Probably) not MPEG audio data");
+            } else if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {  // roll back and let mpg123 have it all.
+                return false;
+            }
+            #endif
+        }
+    }
+
     MPG123_AudioUserData *payload = NULL;
     const long *rates = NULL;
     size_t num_rates = 0;
