@@ -101,7 +101,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     const char *audiofname = argv[1];
     MIX_Audio *audio = MIX_LoadAudio(audiofname, false);
     if (!audio) {
-        SDL_Log("Failed to load audio: %s", SDL_GetError());
+        SDL_Log("Failed to load '%s': %s", audiofname, SDL_GetError());
         return SDL_APP_FAILURE;
     }
 
