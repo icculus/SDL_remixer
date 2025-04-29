@@ -604,6 +604,9 @@ MIX_Audio *MIX_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
 
         // !!! FIXME: currently we're ignoring return values from this function (see FIXME at the top of its code).
         MIX_ReadMetadataTags(io, audio->props, &clamp);
+        if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {
+            goto failed;
+        }
     }
 
     // the decoder sets audio->spec to whatever it's actually providing, but we pass the current hardware setting in, in case that's useful for
