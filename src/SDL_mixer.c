@@ -211,8 +211,11 @@ static void ApplyFade(MIX_Track *track, float *pcm, int frames)
 
     track->fade_frames -= to_be_faded;
     SDL_assert(track->fade_frames >= 0);
-    if (track->fade_frames == 0) {
-        track->fade_direction = 0;  // fade is done.
+    if (track->fade_frames == 0) {  // fade is done.
+        if (track->fade_direction < 0) {
+            track->loops_remaining = 0;  // we were fading out, don't loop anymore.
+        }
+        track->fade_direction = 0;
     }
 }
 
