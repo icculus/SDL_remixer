@@ -55,8 +55,8 @@ static bool MIX_LOADER_SYMCOMBINE(LoadModule_, MIX_LOADER_MODULE)(void)
         #else
             #define MIX_LOADER_FUNCTION(required,ret,fn,args) \
                 MIX_LOADER_MODULE.fn = fn; \
-                if (MIX_LOADER_MODULE.fn == NULL) && ((required))) { \
-                    SDL_SetError("Missing " MIX_LOADER_MODULE " framework"); \
+                if ((MIX_LOADER_MODULE.fn == NULL) && ((required))) { \
+                    SDL_SetError("Missing " SDL_STRINGIFY_ARG(MIX_LOADER_MODULE) " framework"); \
                     retval = false; \
                 }
         #endif
