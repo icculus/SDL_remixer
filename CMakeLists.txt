@@ -259,6 +259,11 @@ add_library(SDL3_mixer::${sdl3_mixer_target_name} ALIAS ${sdl3_mixer_target_name
 if(NOT TARGET SDL3_mixer::SDL3_mixer)
     add_library(SDL3_mixer::SDL3_mixer ALIAS ${sdl3_mixer_target_name})
 endif()
+if("c_std_99" IN_LIST CMAKE_C_COMPILE_FEATURES)
+    target_compile_features(${sdl3_mixer_target_name} PRIVATE c_std_99)
+else()
+    message(WARNING "target_compile_features does not know c_std_99 for C compiler")
+endif()
 target_include_directories(${sdl3_mixer_target_name}
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -1138,6 +1143,9 @@ if(SDLMIXER_SAMPLES)
             add_library(${TARGET} SHARED ${ARGN})
         else()
             add_executable(${TARGET} ${ARGN})
+        endif()
+        if("c_std_99" IN_LIST CMAKE_C_COMPILE_FEATURES)
+            target_compile_features(${TARGET} PRIVATE c_std_99)
         endif()
         sdl_add_warning_options(${TARGET} WARNING_AS_ERROR ${SDLMIXER_WERROR})
         sdl_target_link_options_no_undefined(${TARGET})
