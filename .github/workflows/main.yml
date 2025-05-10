@@ -36,7 +36,7 @@ jobs:
           cmake \
           libasound2-dev \
           libflac-dev \
-          libfluidsynth-dev \
+          fluidsynth \
           libgme-dev \
           libmpg123-dev \
           libopusfile-dev \
