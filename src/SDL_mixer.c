@@ -30,7 +30,7 @@ static const MIX_Decoder *decoders[] = {
     #ifdef DECODER_WAV
     &MIX_Decoder_WAV,
     #endif
-    #ifdef DECODER_
+    #ifdef DECODER_AIFF
     &MIX_Decoder_AIFF,
     #endif
     #ifdef DECODER_VORBIS_VORBISFILE
