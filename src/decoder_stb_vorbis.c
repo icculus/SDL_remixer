@@ -19,6 +19,8 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+#ifdef DECODER_OGGVORBIS_STB
+
 // This file supports Ogg Vorbis audio streams using the public-domain, header-only library, stb_vorbis.
 
 #include "SDL_mixer_internal.h"
@@ -288,3 +290,4 @@ MIX_Decoder MIX_Decoder_STBVORBIS = {
     STBVORBIS_quit
 };
 
+#endif

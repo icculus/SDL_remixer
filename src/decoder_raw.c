@@ -19,6 +19,8 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+// (this decoder is always enabled, as it is used internally.)
+
 #include "SDL_mixer_internal.h"
 
 typedef struct RAW_AudioUserData

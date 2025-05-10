@@ -21,6 +21,8 @@
 
 // This file supports Ogg Opus audio streams using libopusfile.
 
+#ifdef DECODER_OPUS
+
 #include "SDL_mixer_internal.h"
 
 #ifdef OPUSFILE_HEADER
@@ -305,3 +307,4 @@ MIX_Decoder MIX_Decoder_OPUS = {
     OPUS_quit
 };
 
+#endif

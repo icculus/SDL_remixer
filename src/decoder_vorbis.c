@@ -21,6 +21,8 @@
 
 // This file supports Ogg Vorbis audio streams using libvorbisfile (or the integer-only implementation, "tremor").
 
+#ifdef DECODER_OGGVORBIS_VORBISFILE
+
 #include "SDL_mixer_internal.h"
 
 #define OV_EXCLUDE_STATIC_CALLBACKS
@@ -338,4 +340,6 @@ MIX_Decoder MIX_Decoder_VORBIS = {
     VORBIS_quit_audio,
     VORBIS_quit
 };
+
+#endif
 

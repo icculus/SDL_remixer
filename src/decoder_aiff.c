@@ -30,6 +30,8 @@
   in december 2002.
 */
 
+#ifdef DECODER_AIFF
+
 #include "SDL_mixer_internal.h"
 
 // !!! FIXME: there is a "streaming" AIFF decoder in SDL2_mixer, which is tangled up with
@@ -247,4 +249,6 @@ MIX_Decoder MIX_Decoder_AIFF = {
     MIX_RAW_quit_audio,
     NULL  // quit
 };
+
+#endif
 

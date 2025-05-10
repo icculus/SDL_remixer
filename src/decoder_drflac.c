@@ -19,6 +19,8 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+#ifdef DECODER_FLAC_DRFLAC
+
 #include "SDL_mixer_internal.h"
 
 #define DR_FLAC_IMPLEMENTATION
@@ -248,4 +250,6 @@ MIX_Decoder MIX_Decoder_DRFLAC = {
     DRFLAC_quit_audio,
     NULL  // quit
 };
+
+#endif
 

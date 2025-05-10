@@ -19,6 +19,8 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+#ifdef DECODER_MOD_XMP
+
 #include "SDL_mixer_internal.h"
 
 #ifdef LIBXMP_HEADER
@@ -311,3 +313,6 @@ MIX_Decoder MIX_Decoder_XMP = {
     XMP_quit_audio,
     XMP_quit
 };
+
+#endif
+

@@ -19,7 +19,9 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
-// This file supports Ogg Vorbis audio streams using libvorbisfile (or the integer-only implementation, "tremor").
+// This file supports Wavpack audio streams using libwavpack.
+
+#ifdef DECODER_WAVPACK
 
 #include "SDL_mixer_internal.h"
 
@@ -632,4 +634,6 @@ MIX_Decoder MIX_Decoder_WAVPACK = {
     WAVPACK_quit_audio,
     WAVPACK_quit
 };
+
+#endif
 

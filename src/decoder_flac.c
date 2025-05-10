@@ -19,6 +19,8 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+#ifdef DECODER_FLAC_LIBFLAC
+
 #include "SDL_mixer_internal.h"
 
 #include <FLAC/stream_decoder.h>
@@ -449,3 +451,4 @@ MIX_Decoder MIX_Decoder_FLAC = {
     FLAC_quit
 };
 
+#endif

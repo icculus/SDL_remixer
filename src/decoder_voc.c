@@ -19,6 +19,8 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+#ifdef DECODER_VOC
+
 #include "SDL_mixer_internal.h"
 
 // Private data for VOC file
@@ -406,4 +408,6 @@ MIX_Decoder MIX_Decoder_VOC = {
     MIX_RAW_quit_audio,
     NULL  // quit
 };
+
+#endif
 

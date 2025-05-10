@@ -21,6 +21,8 @@
 
 // SDL2_mixer's FluidSynth code was written by James Le Cuirot; this was rewritten using that work as a reference.
 
+#ifdef DECODER_MIDI_FLUIDSYNTH
+
 #include "SDL_mixer_internal.h"
 
 #include <fluidsynth.h>
@@ -366,4 +368,6 @@ MIX_Decoder MIX_Decoder_FLUIDSYNTH = {
     FLUIDSYNTH_quit_audio,
     FLUIDSYNTH_quit
 };
+
+#endif
 

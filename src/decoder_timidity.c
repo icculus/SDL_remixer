@@ -21,6 +21,8 @@
 
 // This file supports playing MIDI files with timidity
 
+#ifdef DECODER_MIDI_TIMIDITY
+
 #include "SDL_mixer_internal.h"
 
 #include "timidity/timidity.h"
@@ -206,4 +208,6 @@ MIX_Decoder MIX_Decoder_TIMIDITY = {
     TIMIDITY_quit_audio,
     TIMIDITY_quit
 };
+
+#endif
 

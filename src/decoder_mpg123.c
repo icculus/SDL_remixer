@@ -19,6 +19,8 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+#ifdef DECODER_MP3_MPG123
+
 #include "SDL_mixer_internal.h"
 
 #define MPG123_ENUM_API /* for mpg123_param() */
@@ -463,3 +465,4 @@ MIX_Decoder MIX_Decoder_MPG123 = {
     MPG123_quit
 };
 
+#endif

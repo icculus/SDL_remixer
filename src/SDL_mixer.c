@@ -24,21 +24,53 @@
 #include "SDL_mixer_internal.h"
 
 static const MIX_Decoder *decoders[] = {
+    #ifdef DECODER_VOC
     &MIX_Decoder_VOC,
+    #endif
+    #ifdef DECODER_WAV
     &MIX_Decoder_WAV,
+    #endif
+    #ifdef DECODER_
     &MIX_Decoder_AIFF,
+    #endif
+    #ifdef DECODER_VORBIS_VORBISFILE
     &MIX_Decoder_VORBIS,
+    #endif
+    #ifdef DECODER_VORBIS_STB
     &MIX_Decoder_STBVORBIS,
+    #endif
+    #ifdef DECODER_OPUS
     &MIX_Decoder_OPUS,
+    #endif
+    #ifdef DECODER_FLAC_LIBFLAC
     &MIX_Decoder_FLAC,
+    #endif
+    #ifdef DECODER_FLAC_DRFLAC
     &MIX_Decoder_DRFLAC,
+    #endif
+    #ifdef DECODER_MIDI_TIMIDITY
     &MIX_Decoder_TIMIDITY,
+    #endif
+    #ifdef DECODER_MIDI_FLUIDSYNTH
     &MIX_Decoder_FLUIDSYNTH,
+    #endif
+    #ifdef DECODER_WAVPACK
     &MIX_Decoder_WAVPACK,
+    #endif
+    #ifdef DECODER_GME
     &MIX_Decoder_GME,
+    #endif
+    #ifdef DECODER_MOD_XMP
     &MIX_Decoder_XMP,
+    #endif
+    #ifdef DECODER_MP3_MPG123
     &MIX_Decoder_MPG123,
+    #endif
+    #ifdef DECODER_MP3_DRMP3
     &MIX_Decoder_DRMP3,
+    #endif
+
+    // these are always available.
     &MIX_Decoder_SINEWAVE,
     &MIX_Decoder_RAW
 };

@@ -19,6 +19,8 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+#ifdef DECODER_WAV
+
 #include "SDL_mixer_internal.h"
 
 static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
@@ -83,4 +85,6 @@ MIX_Decoder MIX_Decoder_WAV = {
     MIX_RAW_quit_audio,
     NULL  // quit
 };
+
+#endif
 

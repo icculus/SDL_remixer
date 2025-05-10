@@ -19,6 +19,8 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+#ifdef DECODER_MP3_DRMP3
+
 #include "SDL_mixer_internal.h"
 
 #define DR_MP3_IMPLEMENTATION
@@ -220,3 +222,4 @@ MIX_Decoder MIX_Decoder_DRMP3 = {
     NULL  // quit
 };
 
+#endif

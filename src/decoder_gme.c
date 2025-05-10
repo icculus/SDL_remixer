@@ -19,6 +19,8 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+#ifdef DECODER_GME
+
 #include "SDL_mixer_internal.h"
 
 #include <gme/gme.h>
@@ -234,3 +236,4 @@ MIX_Decoder MIX_Decoder_GME = {
     GME_quit
 };
 
+#endif
