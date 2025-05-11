@@ -1,5 +1,6 @@
 SDL3_mixer_0.0.0 {
   global:
+    MIX_Version;
     MIX_OpenMixer;
     MIX_CloseMixer;
     MIX_GetNumAudioDecoders;
