@@ -435,6 +435,11 @@ static void QuitDecoders(void)
     num_available_decoders = 0;
 }
 
+int MIX_Version(void)
+{
+    return SDL_MIXER_VERSION;
+}
+
 bool MIX_OpenMixer(SDL_AudioDeviceID devid, const SDL_AudioSpec *spec)
 {
     if (CheckInitialized()) {

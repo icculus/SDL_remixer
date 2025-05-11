@@ -46,6 +46,29 @@ typedef struct MIX_Audio MIX_Audio;
 typedef struct MIX_Track MIX_Track;
 
 
+#define SDL_MIXER_MAJOR_VERSION 3
+#define SDL_MIXER_MINOR_VERSION 0
+#define SDL_MIXER_MICRO_VERSION 0
+
+/** This is the version number macro for the current SDL_mixer version. */
+#define SDL_MIXER_VERSION \
+    SDL_VERSIONNUM(SDL_MIXER_MAJOR_VERSION, SDL_MIXER_MINOR_VERSION, SDL_MIXER_MICRO_VERSION)
+
+/** This macro will evaluate to true if compiled with SDL_mixer at least X.Y.Z. */
+#define SDL_MIXER_VERSION_ATLEAST(X, Y, Z) \
+    ((SDL_MIXER_MAJOR_VERSION >= X) && \
+     (SDL_MIXER_MAJOR_VERSION > X || SDL_MIXER_MINOR_VERSION >= Y) && \
+     (SDL_MIXER_MAJOR_VERSION > X || SDL_MIXER_MINOR_VERSION > Y || SDL_MIXER_MICRO_VERSION >= Z))
+
+/**
+ * This function gets the version of the dynamically linked SDL_mixer library.
+ *
+ * \returns SDL_mixer version.
+ *
+ * \since This function is available since SDL_mixer 3.0.0.
+ */
+extern SDL_DECLSPEC int SDLCALL MIX_Version(void);
+
 // there is no separate "init" function. You open the audio device (presumably just the default audio device) and go.
 
 // spec is optional, can be used as a hint as to how most your audio will be formatted. We will still accept any format, and passing a NULL spec is valid.
