@@ -54,7 +54,7 @@ struct MIX_Audio
 
 struct MIX_Track
 {
-    Uint8 *input_buffer;  // a place to process audio as it progresses through the callback.
+    float *input_buffer;  // a place to process audio as it progresses through the callback.
     size_t input_buffer_len;  // number of bytes allocated to input_buffer.
     MIX_Audio *input_audio;    // non-NULL if used with MIX_SetTrackAudioStream. Holds a reference.
     SDL_AudioStream *input_stream;  // used for both MIX_SetTrackAudio and MIX_SetTrackAudioStream. Maybe not owned by SDL_mixer!
@@ -73,15 +73,28 @@ struct MIX_Track
     int loops_remaining;  // seek to loop_start and continue this many more times at end of input. Negative to loop forever.
     int loop_start;      // sample frame position for loops to begin, so you can play an intro once and then loop from an internal point thereafter.
     SDL_PropertiesID tags;  // lookup tags to see if they are currently applied to this track (true or false).
-    MIX_TrackMixCallback mix_callback;
-    void *mix_callback_userdata;
+    MIX_TrackMixCallback raw_callback;
+    void *raw_callback_userdata;
+    MIX_TrackMixCallback cooked_callback;
+    void *cooked_callback_userdata;
     MIX_TrackStoppedCallback stopped_callback;
     void *stopped_callback_userdata;
+    MIX_Group *group; // might be default_group, which should not be returned to the app (the app sees that as a NULL group).
     MIX_Track *prev;  // double-linked list for all_tracks.
     MIX_Track *next;
+    MIX_Track *group_prev;  // double-linked list for the owning group.
+    MIX_Track *group_next;
     MIX_Track *fire_and_forget_next;  // linked list for the fire-and-forget pool.
 };
 
+struct MIX_Group
+{
+    MIX_Track *tracks;
+    MIX_GroupMixCallback postmix_callback;
+    void *postmix_callback_userdata;
+    MIX_Group *prev;  // double-linked list for all_groups.
+    MIX_Group *next;
+};
 
 // these are not (currently) available in the public API, and may change names or functionality, or be removed.
 #define MIX_PROP_DECODER_NAME_STRING "SDL_mixer.decoder.name"

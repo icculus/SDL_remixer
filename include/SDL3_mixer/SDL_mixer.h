@@ -44,6 +44,7 @@ extern "C" {
 
 typedef struct MIX_Audio MIX_Audio;
 typedef struct MIX_Track MIX_Track;
+typedef struct MIX_Group MIX_Group;
 
 
 #define SDL_MIXER_MAJOR_VERSION 3
@@ -190,16 +191,25 @@ extern SDL_DECLSPEC float SDLCALL MIX_GetTrackFrequencyRatio(MIX_Track *track);
 // channel maps...
 extern SDL_DECLSPEC bool SDLCALL MIX_SetTrackOutputChannelMap(MIX_Track *track, const int *chmap, int count);
 
+// groups...
+extern SDL_DECLSPEC MIX_Group * SDLCALL MIX_CreateGroup(void);
+extern SDL_DECLSPEC void SDLCALL MIX_DestroyGroup(MIX_Group *group);
+extern SDL_DECLSPEC bool MIX_SetTrackGroup(MIX_Track *track, MIX_Group *group);
+
 
 // hooks...
-
 typedef void (SDLCALL *MIX_TrackStoppedCallback)(void *userdata, MIX_Track *track);
 extern SDL_DECLSPEC bool SDLCALL MIX_SetTrackStoppedCallback(MIX_Track *track, MIX_TrackStoppedCallback cb, void *userdata);  // if set, is called when an track halts for any reason except destruction.
 
-extern SDL_DECLSPEC bool SDLCALL MIX_SetPostMixCallback(SDL_AudioPostmixCallback mix_func, void *userdata);  // just calls the standard SDL postmix callback.
-
 typedef void (SDLCALL *MIX_TrackMixCallback)(void *userdata, MIX_Track *track, const SDL_AudioSpec *spec, float *pcm, int samples);
-extern SDL_DECLSPEC bool SDLCALL MIX_SetTrackMixCallback(MIX_Track *track, MIX_TrackMixCallback cb, void *userdata);  // is called as data is to be mixed, so you can view (and edit) the source's data. Always in float32 format!
+extern SDL_DECLSPEC bool SDLCALL MIX_SetTrackRawCallback(MIX_Track *track, MIX_TrackMixCallback cb, void *userdata);  // is called as data is decoded, so you can view (and edit) the source's data unchanged. Always in float32 format!
+extern SDL_DECLSPEC bool SDLCALL MIX_SetTrackCookedCallback(MIX_Track *track, MIX_TrackMixCallback cb, void *userdata);  // is called as data is to be mixed, with all its transformations (gain, fade, frequency ratio, etc), so you can view (and edit) the source's data. Always in float32 format!
+
+typedef void (SDLCALL *MIX_GroupMixCallback)(void *userdata, MIX_Group *group, const SDL_AudioSpec *spec, float *pcm, int samples);
+extern SDL_DECLSPEC bool SDLCALL MIX_SetGroupPostMixCallback(MIX_Group *group, MIX_GroupMixCallback cb, void *userdata);  // is called when a group of tracks has been mixed, before it mixes with other groups. This is the mixed data of all "cooked" tracks in the group.
+extern SDL_DECLSPEC bool SDLCALL MIX_SetPostMixCallback(SDL_AudioPostmixCallback cb, void *userdata);  // just calls the standard SDL postmix callback, as mixed data is going to the audio hardware to be played!
+
+
 
 /* Ends C function definitions when using C++ */
 #ifdef __cplusplus

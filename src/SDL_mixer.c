@@ -86,16 +86,20 @@ typedef struct MIX_TagList
     SDL_RWLock *rwlock;
 } MIX_TagList;
 
-static SDL_AudioDeviceID audio_device = 0;
+static SDL_AudioStream *audio_device_stream = NULL;
+static SDL_AudioSpec audio_device_spec;
 static SDL_PropertiesID track_tags = 0;
+static MIX_Group *default_group = NULL;
 static MIX_Track *all_tracks = NULL;
 static MIX_Track *fire_and_forget_pool = NULL;  // these are also listed in all_tracks.
 static MIX_Audio *all_audios = NULL;
-static SDL_Mutex *mixer_sync_lock = NULL;
+static MIX_Group *all_groups = NULL;
+static float *mix_buffer = NULL;
+static int mix_buffer_allocation = 0;
 
 static bool CheckInitialized(void)
 {
-    if (!audio_device) {
+    if (!audio_device_stream) {
         return SDL_SetError("Audio not opened");
     }
     return true;
@@ -131,6 +135,16 @@ static bool CheckAudioParam(MIX_Audio *audio)
     return true;
 }
 
+static bool CheckGroupParam(MIX_Group *group)
+{
+    if (!CheckInitialized()) {
+        return false;
+    } else if (!group) {
+        return SDL_InvalidParamError("group");
+    }
+    return true;
+}
+
 static bool CheckTrackTagParam(MIX_Track *track, const char *tag)
 {
     if (!CheckInitialized()) {
@@ -143,40 +157,15 @@ static bool CheckTrackTagParam(MIX_Track *track, const char *tag)
     return true;
 }
 
-// this protects global mixer state, like linked lists of the MIX_Tracks.
-static void LockMixerState(void)
+static void LockMixer(void)
 {
-    // this is just a convenient lock to protect mixer state, but this doesn't specifically have anything to do with tags.
-    SDL_LockProperties(track_tags);
+    SDL_LockAudioStream(audio_device_stream);
 }
 
-static void UnlockMixerState(void)
+static void UnlockMixer(void)
 {
-    // this is just a convenient lock to protect mixer state, but this doesn't specifically have anything to do with tags.
-    SDL_UnlockProperties(track_tags);
+    SDL_UnlockAudioStream(audio_device_stream);
 }
-
-// this makes sure the mixer is not mixing at this very moment, so you can change multiple tracks atomically.
-static void LockMixerSync(void)
-{
-    SDL_LockMutex(mixer_sync_lock);
-}
-
-static void UnlockMixerSync(void)
-{
-    SDL_UnlockMutex(mixer_sync_lock);
-}
-
-static void SDLCALL AudioIterationStart(void *userdata, SDL_AudioDeviceID devid, bool start)
-{
-    LockMixerSync();
-}
-
-static void SDLCALL AudioIterationEnd(void *userdata, SDL_AudioDeviceID devid, bool start)
-{
-    UnlockMixerSync();
-}
-
 
 // this assumes LockTrack(track) was called before this.
 static void TrackStopped(MIX_Track *track)
@@ -191,10 +180,10 @@ static void TrackStopped(MIX_Track *track)
         SDL_assert(track->state == MIX_STATE_STOPPED);  // should not have changed, shouldn't have a stopped_callback, etc.
         SDL_assert(track->fire_and_forget_next == NULL);  // shouldn't be in the list at all right now.
         MIX_SetTrackAudio(track, NULL);
-        LockMixerState();
+        LockMixer();
         track->fire_and_forget_next = fire_and_forget_pool;
         fire_and_forget_pool = track;
-        UnlockMixerState();
+        UnlockMixer();
     }
 }
 
@@ -281,38 +270,33 @@ static int FillSilenceFrames(MIX_Track *track, void *buffer, int buflen)
     return br;
 }
 
-// This is where the magic happens. This feeds data from a single track to
-//  SDL's mixer. This happens periodically from SDL's audio device thread.
-// This function assumes LockTrack() was called by the caller (since SDL's
-//  mixer locks the audio stream, it's the same thing).
-static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
+// This is called every time we try to pull more from a track's output_stream.
+// We generate more audio here on-demand, either from a decoder, or pulling
+// from another audio stream.
+// track->output_stream is locked when calling this.
+static void SDLCALL TrackGetCallback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
 {
-    if (additional_amount == 0) {
-        return;  // nothing to actually do yet. This was a courtesy call; the stream still has enough buffered.
-    }
-
     MIX_Track *track = (MIX_Track *) userdata;
     SDL_assert(stream == track->output_stream);
 
-    if (track->state != MIX_STATE_PLAYING) {
+    if (additional_amount == 0) {
+        return;  // don't need to generate more audio yet.
+    } else if (track->state != MIX_STATE_PLAYING) {
         return;  // paused or stopped, don't make progress.
     }
-
-    // !!! FIXME: maybe we should do a consistent buffer size, to make this easier for app callbacks
-    // !!! FIXME:  and save some trouble on systems that want to do like 200 samples at a time.
 
     // do we need to grow our buffer?
     if (additional_amount > track->input_buffer_len) {
         void *ptr = SDL_realloc(track->input_buffer, additional_amount);
         if (!ptr) {   // uhoh.
-            TrackStopped(track);  // not much to be done, we're out of memory!
-            return;
+            TrackStopped(track);
+            return;  // not much to be done, we're out of memory!
         }
-        track->input_buffer = (Uint8 *) ptr;
+        track->input_buffer = (float *) ptr;
         track->input_buffer_len = additional_amount;
     }
 
-    float *pcm = (float *) track->input_buffer;  // we always work in float32 format.
+    float *pcm = track->input_buffer;  // we always work in float32 format.
     int bytes_remaining = additional_amount;
 
     // Calling TrackStopped() might have a stopped_callback that restarts the track, so don't break the loop
@@ -338,7 +322,7 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
             SDL_assert(track->input_stream != NULL);  // should have data bound if you landed here.
 
             // this (probably?) shouldn't be a partial read here. It's either we completely filled the buffer or exhausted the data.
-            //  as such, this does mix_callback() as likely the entire buffer, or all we're getting before a finish callback would have to fire,
+            //  as such, this does raw_callback() as likely the entire buffer, or all we're getting before a finish callback would have to fire,
             //  even if the finish callback would restart the track. As such, the outer loop is mostly here to deal with looping tracks
             //  and finish callbacks that restart the track.
 
@@ -369,8 +353,8 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
             // give the app a shot at the final buffer before sending it on for mixing
             const int samples = frames_read * channels;
 
-            if (track->mix_callback) {
-                track->mix_callback(track->mix_callback_userdata, track, &track->output_spec, pcm, samples);
+            if (track->raw_callback) {
+                track->raw_callback(track->raw_callback_userdata, track, &track->output_spec, pcm, samples);
             }
 
             ApplyFade(track, pcm, frames_read);
@@ -414,6 +398,97 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
     }
 }
 
+static void MixFloat32Audio(float *dst, const float *src, const int buffer_size)
+{
+    if (!SDL_MixAudio((Uint8 *) dst, (const Uint8 *) src, SDL_AUDIO_F32, buffer_size, 1.0f)) {
+        SDL_assert(!"This shouldn't happen.");
+    }
+}
+
+// SDL calls this function from the audio device thread as more data is needed the mixer.
+static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
+{
+    if (additional_amount == 0) {
+        return;  // nothing to actually do yet. This was a courtesy call; the stream still has enough buffered.
+    }
+
+#if 0 // !!! FIXME: install an event listener for this.
+    SDL_AudioSpec src_spec, dst_spec;
+    if (!SDL_GetAudioStreamFormat(stream, &src_spec, &dst_spec)) {
+        return;  // oh well.
+    } else {
+        if (SDL_memcmp(&src_spec, &dst_spec, sizeof (src_spec)) != 0) {  // device format changed?
+            // try to adjust additional_amount, since the request was for the previous source spec...
+            additional_amount /= SDL_AUDIO_FRAMESIZE(src_spec);  // convert bytes to sample_frames
+            additional_amount = (int) ((float) additional_amount * (((float) dst_spec.freq) / ((float) src_spec.freq)));
+            additional_amount *= SDL_AUDIO_FRAMESIZE(dst_spec);  // convert bytes to sample_frames
+            // the group stream accepts and mixes input in device format, no conversion.
+            SDL_SetAudioStreamFormat(stream, &dst_spec, NULL);  // all the tracks' output format would have already changed, so we're uniform here now.
+        }
+    }
+#endif
+
+    // it should be asking for float data...
+    SDL_assert((additional_amount % sizeof (float)) == 0);
+
+    // !!! FIXME: maybe we should do a consistent buffer size, to make this easier for app callbacks
+    // !!! FIXME:  and save some trouble on systems that want to do like 200 samples at a time.
+
+    // do we need to grow our buffer?
+    const bool skip_group_mixing = !all_groups || !all_groups->next;
+    const int alloc_multiplier = skip_group_mixing ? 2 : 3;
+    const int alloc_size = additional_amount * alloc_multiplier;
+    if (alloc_size > mix_buffer_allocation) {
+        void *ptr = SDL_realloc(mix_buffer, alloc_size);
+        if (!ptr) {   // uhoh.
+            return;  // not much to be done, we're out of memory!
+        }
+        mix_buffer = (float *) ptr;
+        mix_buffer_allocation = alloc_size;
+    }
+
+    float *getbuf = mix_buffer;
+    float *final_mixbuf = getbuf + (additional_amount / sizeof (float));
+    float *group_mixbuf = skip_group_mixing ? final_mixbuf : (final_mixbuf + (additional_amount / sizeof (float)));
+
+    SDL_memset(final_mixbuf, '\0', additional_amount);
+
+    MIX_Group *next_group = NULL;
+    for (MIX_Group *group = all_groups; group; group = next_group) {
+        next_group = group->next;  // this won't save you from a callback going totally rogue, but it'll deal with the current group changing.
+        if (!skip_group_mixing) {
+            SDL_memset(group_mixbuf, '\0', additional_amount);  // if skip_group_mixing, this is final_mixbuf, which we just zero'd out.
+        }
+
+        int group_bytes = 0;
+        MIX_Track *next_track = NULL;
+        for (MIX_Track *track = group->tracks; track; track = next_track) {
+            next_track = track->group_next;  // this won't save you from a callback going totally rogue, but it'll deal with the current track leaving the group.
+            if (track->state == MIX_STATE_PLAYING) {
+                const int br = SDL_GetAudioStreamData(track->output_stream, getbuf, additional_amount);
+                if (br > 0) {
+                    group_bytes = SDL_max(group_bytes, br);
+                    if (track->cooked_callback) {
+                        SDL_assert(track->output_spec.format == SDL_AUDIO_F32);
+                        track->cooked_callback(track->cooked_callback_userdata, track, &track->output_spec, getbuf, br / sizeof (float));
+                    }
+                    MixFloat32Audio(group_mixbuf, getbuf, br);
+                }
+            }
+        }
+
+        if (group->postmix_callback) {
+            group->postmix_callback(group->postmix_callback_userdata, group, &audio_device_spec, group_mixbuf, additional_amount);
+        }
+
+        if (!skip_group_mixing) {
+            MixFloat32Audio(final_mixbuf, group_mixbuf, group_bytes);
+        }
+    }
+
+    SDL_PutAudioStreamData(stream, final_mixbuf, additional_amount);
+}
+
 static void InitDecoders(void)
 {
     for (int i = 0; i < SDL_arraysize(decoders); i++) {
@@ -451,14 +526,23 @@ bool MIX_OpenMixer(SDL_AudioDeviceID devid, const SDL_AudioSpec *spec)
         return false;
     }
 
-    SDL_assert(!audio_device);
-    audio_device = SDL_OpenAudioDevice(devid, spec);
-    if (!audio_device) {
+    SDL_assert(!audio_device_stream);
+    audio_device_stream = SDL_OpenAudioDeviceStream(devid, spec, MixerCallback, NULL);
+    if (!audio_device_stream) {
         goto failed;
     }
 
-    // !!! FIXME: if we allow multiple opens, only the first one should init decoders.
-    InitDecoders();
+    if (!SDL_GetAudioStreamFormat(audio_device_stream, &audio_device_spec, NULL)) {
+        goto failed;
+    }
+
+    // on our end, we always work in float32 format.
+    if (audio_device_spec.format != SDL_AUDIO_F32) {
+        audio_device_spec.format = SDL_AUDIO_F32;
+        if (!SDL_SetAudioStreamFormat(audio_device_stream, &audio_device_spec, NULL)) {
+            goto failed;
+        }
+    }
 
     SDL_assert(!track_tags);
     track_tags = SDL_CreateProperties();
@@ -466,22 +550,27 @@ bool MIX_OpenMixer(SDL_AudioDeviceID devid, const SDL_AudioSpec *spec)
         goto failed;
     }
 
-    SDL_assert(!mixer_sync_lock);
-    mixer_sync_lock = SDL_CreateMutex();
-    if (!mixer_sync_lock) {
+    default_group = MIX_CreateGroup();
+    if (!default_group) {
         goto failed;
     }
 
-    if (!SDL_SetAudioIterationCallbacks(audio_device, AudioIterationStart, AudioIterationEnd, NULL)) {
-        goto failed;
-    }
+    // !!! FIXME: if we allow multiple opens, only the first one should init decoders.
+    InitDecoders();
+
+    SDL_ResumeAudioStreamDevice(audio_device_stream);
 
     return true;
 
 failed:
-    if (audio_device) {
-        SDL_CloseAudioDevice(audio_device);
-        audio_device = 0;
+    if (audio_device_stream) {
+        SDL_DestroyAudioStream(audio_device_stream);
+        audio_device_stream = NULL;
+    }
+
+    if (default_group) {
+        MIX_DestroyGroup(default_group);
+        default_group = NULL;
     }
 
     if (track_tags) {
@@ -489,18 +578,22 @@ failed:
         track_tags = 0;
     }
 
+    SDL_zero(audio_device_spec);
     SDL_QuitSubSystem(SDL_INIT_AUDIO);
     return false;
-
 }
 
 void MIX_CloseMixer(void)
 {
-    if (audio_device) {
+    if (audio_device_stream) {
         MIX_StopAllTracks(0);
 
         while (all_tracks) {
             MIX_DestroyTrack(all_tracks);
+        }
+
+        while (all_groups) {
+            MIX_DestroyGroup(all_groups);
         }
 
         while (all_audios) {
@@ -508,15 +601,20 @@ void MIX_CloseMixer(void)
         }
 
         fire_and_forget_pool = NULL;  // these were also in all_tracks, so they're already destroyed.
+        default_group = NULL;  // this was also in all_groups, so it's already destroyed.
 
-        SDL_CloseAudioDevice(audio_device);
-        audio_device = 0;
+        SDL_DestroyAudioStream(audio_device_stream);
+        audio_device_stream = NULL;
+
         SDL_QuitSubSystem(SDL_INIT_AUDIO);
         SDL_DestroyProperties(track_tags);
         track_tags = 0;
-        SDL_DestroyMutex(mixer_sync_lock);
-        mixer_sync_lock = NULL;
 
+        SDL_free(mix_buffer);
+        mix_buffer = NULL;
+        mix_buffer_allocation = 0;
+
+        SDL_zero(audio_device_spec);
         QuitDecoders();  // !!! FIXME: if we allow multiple opens, the last one to close should call this. Or we could re-add MIX_Init().
     }
 }
@@ -544,7 +642,8 @@ bool MIX_GetDeviceSpec(SDL_AudioSpec *spec)
     } else if (!spec) {
         return SDL_InvalidParamError("spec");
     }
-    return SDL_GetAudioDeviceFormat(audio_device, spec, NULL);
+    SDL_copyp(spec, &audio_device_spec);
+    return true;  // technically this is the device format, forced to float32.
 }
 
 static const MIX_Decoder *PrepareDecoder(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
@@ -652,11 +751,7 @@ MIX_Audio *MIX_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
     // the decoder sets audio->spec to whatever it's actually providing, but we pass the current hardware setting in, in case that's useful for
     // things that generate audio in whatever format (for example, a MIDI decoder is going to generate PCM from "notes", so it can do it at any
     // sample rate, so it might as well do it at device format to avoid an unnecessary resample later).
-    if (!MIX_GetDeviceSpec(&audio->spec)) {
-        audio->spec.channels = 2;   // eh, just set a reasonable default...
-        audio->spec.freq = 44100;
-    }
-    audio->spec.format = SDL_AUDIO_F32;  // we always want to favor float32 for our own purposes, regardless of the hardware settings.
+    SDL_copyp(&audio->spec, &audio_device_spec);
 
     decoder = PrepareDecoder(io, &audio->spec, audio->props, &duration_frames, &audio_userdata);
     if (!decoder) {
@@ -705,13 +800,13 @@ MIX_Audio *MIX_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
 
     SDL_AtomicIncRef(&audio->refcount);
 
-    LockMixerState();
+    LockMixer();
     audio->next = all_audios;
     if (all_audios) {
         all_audios->prev = audio;
     }
     all_audios = audio;
-    UnlockMixerState();
+    UnlockMixer();
 
     return audio;
 
@@ -835,13 +930,13 @@ MIX_Audio *MIX_LoadRawAudio(const void *data, size_t datalen, const SDL_AudioSpe
     SDL_copyp(&audio->spec, spec);
     SDL_AtomicIncRef(&audio->refcount);
 
-    LockMixerState();
+    LockMixer();
     audio->next = all_audios;
     if (all_audios) {
         all_audios->prev = audio;
     }
     all_audios = audio;
-    UnlockMixerState();
+    UnlockMixer();
 
     return audio;
 }
@@ -893,17 +988,16 @@ static void RefAudio(MIX_Audio *audio)
 static void UnrefAudio(MIX_Audio *audio)
 {
     if (audio && SDL_AtomicDecRef(&audio->refcount)) {
-        LockMixerState();
-        if (audio->prev == NULL) {
-            all_audios = audio->next;
-        }
+        LockMixer();
         if (audio->prev) {
             audio->prev->next = audio->next;
+        } else {
+            all_audios = audio->next;
         }
         if (audio->next) {
             audio->next->prev = audio->prev;
         }
-        UnlockMixerState();
+        UnlockMixer();
 
         if (audio->decoder) {
             audio->decoder->quit_audio(audio->decoder_userdata);
@@ -939,36 +1033,25 @@ MIX_Track *MIX_CreateTrack(void)
         return NULL;
     }
 
-    // just _something_ so there's a valid input spec until real data is assigned.
-    const SDL_AudioSpec spec = { SDL_AUDIO_F32, 1, 48000 };
-    track->output_stream = SDL_CreateAudioStream(&spec, NULL);
+    track->output_stream = SDL_CreateAudioStream(&audio_device_spec, &audio_device_spec);
     if (!track->output_stream) {
         SDL_DestroyProperties(track->tags);
         SDL_free(track);
         return NULL;
     }
 
-    SDL_SetAudioStreamGetCallback(track->output_stream, MixerCallback, track);
+    SDL_SetAudioStreamGetCallback(track->output_stream, TrackGetCallback, track);
 
-    LockMixerState();
+    LockMixer();
+    SDL_SetAudioStreamFormat(track->output_stream, &audio_device_spec, &audio_device_spec);  // just in case this changed.
     track->next = all_tracks;
     if (all_tracks) {
         all_tracks->prev = track;
     }
     all_tracks = track;
-    UnlockMixerState();
+    UnlockMixer();
 
-    if (!SDL_BindAudioStream(audio_device, track->output_stream)) {
-        char *err = SDL_strdup(SDL_GetError());   // save this off in case destruction changes it.
-        MIX_DestroyTrack(track);  // just destroy it normally, it was otherwise initialized.
-        if (!err) {
-            SDL_OutOfMemory();
-        } else {
-            SDL_SetError("%s", err);
-            SDL_free(err);
-        }
-        return NULL;
-    }
+    MIX_SetTrackGroup(track, NULL);  // this sets up state and updates linked lists. Should not fail!
 
     return track;
 }
@@ -988,20 +1071,29 @@ void MIX_DestroyTrack(MIX_Track *track)
         return;
     }
 
-    LockMixerState();
-    if (track->prev == NULL) {
-        all_tracks = track->next;
-    }
+    LockMixer();
     if (track->prev) {
         track->prev->next = track->next;
+    } else {
+        all_tracks = track->next;
     }
     if (track->next) {
         track->next->prev = track->prev;
     }
     // we don't check the fire-and-forget pool because that is only free'd, with all_tracks, when closing the mixer.
-    UnlockMixerState();
 
-    SDL_UnbindAudioStream(track->output_stream);
+    SDL_assert(track->group != NULL);
+    if (track->group_prev) {
+        track->group_prev->group_next = track->group_next;
+    } else {
+        track->group->tracks = track->group_next;
+    }
+    if (track->group_next) {
+        track->group_next->group_prev = track->group_prev;
+    }
+    track->group = NULL;
+    UnlockMixer();
+
     SDL_DestroyAudioStream(track->output_stream);
 
     if (track->input_audio) {
@@ -1071,7 +1163,7 @@ bool MIX_SetTrackAudio(MIX_Track *track, MIX_Audio *audio)
         if (retval) {
             RefAudio(audio);
             SDL_SetAudioStreamFormat(track->internal_stream, &audio->spec, &spec);   // input is from decoded audio, output is to output_stream
-            SDL_SetAudioStreamFormat(track->output_stream, &spec, NULL);   // input is from internal_stream, output is to device, so leave that side NULL for SDL to control.
+            SDL_SetAudioStreamFormat(track->output_stream, &spec, &audio_device_spec);   // input is from internal_stream, output is to audio_device_stream.
             SDL_copyp(&track->output_spec, &spec);
             track->input_audio = audio;
             track->input_stream = track->internal_stream;
@@ -1401,13 +1493,13 @@ bool MIX_PlayAudio(MIX_Audio *audio)
     }
 
     // grab an existing fire-and-forget track from the available pool.
-    LockMixerState();
+    LockMixer();
     MIX_Track *track = fire_and_forget_pool;
     if (track) {
         fire_and_forget_pool = track->fire_and_forget_next;
         track->fire_and_forget_next = NULL;
     }
-    UnlockMixerState();
+    UnlockMixer();
 
     if (!track) {  // make a new item if the pool was empty.
         track = MIX_CreateTrack();
@@ -1453,13 +1545,13 @@ bool MIX_StopAllTracks(Sint64 fadeOut)
         return false;
     }
 
-    LockMixerSync();
+    LockMixer();  // lock the mixer so all tracks stop at the same time.
 
     for (MIX_Track *track = all_tracks; track != NULL; track = track->next) {
         StopTrack(track, (fadeOut > 0) ? MIX_TrackMSToFrames(track, fadeOut) : -1);
     }
 
-    UnlockMixerSync();
+    UnlockMixer();
 
     return true;
 }
@@ -1511,13 +1603,13 @@ bool MIX_PauseAllTracks(void)
         return false;
     }
 
-    LockMixerSync();
+    LockMixer();  // lock the mixer so all tracks pause at the same time.
 
     for (MIX_Track *track = all_tracks; track != NULL; track = track->next) {
         PauseTrack(track);
     }
 
-    UnlockMixerSync();
+    UnlockMixer();
 
     return true;
 }
@@ -1533,7 +1625,7 @@ bool MIX_PauseTag(const char *tag)
         return true;  // nothing is using this tag, do nothing (but not an error).
     }
 
-    LockMixerSync();
+    LockMixer();  // lock the mixer so all tracks pause at the same time.
     SDL_LockRWLockForReading(list->rwlock);
 
     const size_t total = list->num_tracks;
@@ -1542,7 +1634,7 @@ bool MIX_PauseTag(const char *tag)
     }
 
     SDL_UnlockRWLock(list->rwlock);
-    UnlockMixerSync();
+    UnlockMixer();
 
     return true;
 }
@@ -1571,13 +1663,13 @@ bool MIX_ResumeAllTracks(void)
         return false;
     }
 
-    LockMixerSync();
+    LockMixer();  // lock the mixer so all tracks resume at the same time.
 
     for (MIX_Track *track = all_tracks; track != NULL; track = track->next) {
         ResumeTrack(track);
     }
 
-    UnlockMixerSync();
+    UnlockMixer();
     return true;
 }
 
@@ -1592,7 +1684,7 @@ bool MIX_ResumeTag(const char *tag)
         return true;  // nothing is using this tag, do nothing (but not an error).
     }
 
-    LockMixerSync();
+    LockMixer();  // lock the mixer so all tracks resume at the same time.
     SDL_LockRWLockForReading(list->rwlock);
 
     const size_t total = list->num_tracks;
@@ -1601,7 +1693,7 @@ bool MIX_ResumeTag(const char *tag)
     }
 
     SDL_UnlockRWLock(list->rwlock);
-    UnlockMixerSync();
+    UnlockMixer();
 
     return true;
 }
@@ -1648,7 +1740,7 @@ bool MIX_SetMasterGain(float gain)
     if (!CheckInitialized()) {
         return false;
     }
-    return SDL_SetAudioDeviceGain(audio_device, gain);
+    return SDL_SetAudioStreamGain(audio_device_stream, gain);
 }
 
 float MIX_GetMasterGain(void)
@@ -1656,7 +1748,7 @@ float MIX_GetMasterGain(void)
     if (!CheckInitialized()) {
         return 1.0f;
     }
-    return SDL_GetAudioDeviceGain(audio_device);
+    return SDL_GetAudioStreamGain(audio_device_stream);
 }
 
 static bool SetTrackGain(MIX_Track *track, float gain)
@@ -1710,7 +1802,7 @@ bool MIX_SetTagGain(const char *tag, float gain)
         return true;  // nothing is using this tag, do nothing (but not an error).
     }
 
-    LockMixerSync();
+    LockMixer();  // lock the mixer so all tracks adust gain at the same time.
     SDL_LockRWLockForReading(list->rwlock);
 
     const size_t total = list->num_tracks;
@@ -1719,7 +1811,7 @@ bool MIX_SetTagGain(const char *tag, float gain)
     }
 
     SDL_UnlockRWLock(list->rwlock);
-    UnlockMixerSync();
+    UnlockMixer();
 
     return true;;
 }
@@ -1772,27 +1864,138 @@ bool MIX_SetTrackOutputChannelMap(MIX_Track *track, const int *chmap, int count)
     return retval;
 }
 
-bool MIX_SetPostMixCallback(SDL_AudioPostmixCallback mix_func, void *userdata)
+bool MIX_SetPostMixCallback(SDL_AudioPostmixCallback cb, void *userdata)
 {
     if (!CheckInitialized()) {
         return false;
     }
-    return SDL_SetAudioPostmixCallback(audio_device, mix_func, userdata);
+    return SDL_SetAudioPostmixCallback(SDL_GetAudioStreamDevice(audio_device_stream), cb, userdata);
 }
 
-bool MIX_SetTrackMixCallback(MIX_Track *track, MIX_TrackMixCallback cb, void *userdata)
+bool MIX_SetTrackRawCallback(MIX_Track *track, MIX_TrackMixCallback cb, void *userdata)
 {
     if (!CheckTrackParam(track)) {
         return false;
     }
 
     LockTrack(track);
-    track->mix_callback = cb;
-    track->mix_callback_userdata = userdata;
+    track->raw_callback = cb;
+    track->raw_callback_userdata = userdata;
     UnlockTrack(track);
     return true;
 }
 
+bool MIX_SetTrackCookedCallback(MIX_Track *track, MIX_TrackMixCallback cb, void *userdata)
+{
+    if (!CheckTrackParam(track)) {
+        return false;
+    }
+
+    LockTrack(track);
+    track->cooked_callback = cb;
+    track->cooked_callback_userdata = userdata;
+    UnlockTrack(track);
+    return true;
+}
+
+MIX_Group *MIX_CreateGroup(void)
+{
+    if (!CheckInitialized()) {
+        return NULL;
+    }
+
+    MIX_Group *group = (MIX_Group *) SDL_calloc(1, sizeof (*group));
+    if (!group) {
+        return NULL;
+    }
+
+    LockMixer();
+    group->next = all_groups;
+    if (all_groups) {
+        all_groups->prev = group;
+    }
+    all_groups = group;
+    UnlockMixer();
+
+    return group;
+}
+
+void MIX_DestroyGroup(MIX_Group *group)
+{
+    if (!CheckGroupParam(group)) {
+        return;
+    }
+
+    LockMixer();
+    if (group->prev) {
+        group->prev->next = group->next;
+    } else {
+        all_groups = group->next;
+    }
+    if (group->next) {
+        group->next->prev = group->prev;
+    }
+
+    MIX_Track *next = NULL;
+    for (MIX_Track *track = group->tracks; track; track = next) {
+        next = track->group_next;  // track->group_next will change in SetTrackGroup, so save it off.
+        MIX_SetTrackGroup(track, NULL);
+    }
+    UnlockMixer();
+
+    SDL_free(group);
+}
+
+bool MIX_SetTrackGroup(MIX_Track *track, MIX_Group *group)
+{
+    if (!CheckTrackParam(track)) {
+        return false;
+    }
+
+    if (!group) {
+        group = default_group;
+    }
+
+    LockMixer();
+    LockTrack(track);
+    MIX_Group *oldgroup = track->group;
+    if (group != oldgroup) {
+        if (oldgroup) {   // remove from current group, if in one.
+            if (track->group_prev) {
+                track->group_prev->group_next = track->group_next;
+            } else {
+                oldgroup->tracks = track->group_next;
+            }
+            if (track->group_next) {
+                track->group_next->group_prev = track->group_prev;
+            }
+        }
+
+        track->group_next = group->tracks;
+        if (group->tracks) {
+            group->tracks->group_prev = track;
+        }
+        group->tracks = track;
+        track->group = group;
+    }
+    UnlockTrack(track);
+    UnlockMixer();
+
+    return true;
+}
+
+bool MIX_SetGroupPostMixCallback(MIX_Group *group, MIX_GroupMixCallback cb, void *userdata)
+{
+    if (!CheckGroupParam(group)) {
+        return false;
+    }
+
+    LockMixer();
+    group->postmix_callback = cb;
+    group->postmix_callback_userdata = userdata;
+    UnlockMixer();
+    return true;
+}
 
 // Clamp an IOStream to a subset of its available data.
 static Sint64 MIX_IoClamp_size(void *userdata)
