@@ -54,6 +54,7 @@ struct MIX_Audio
 
 struct MIX_Track
 {
+    MIX_Mixer *mixer;
     float *input_buffer;  // a place to process audio as it progresses through the callback.
     size_t input_buffer_len;  // number of bytes allocated to input_buffer.
     MIX_Audio *input_audio;    // non-NULL if used with MIX_SetTrackAudioStream. Holds a reference.
@@ -89,11 +90,31 @@ struct MIX_Track
 
 struct MIX_Group
 {
+    MIX_Mixer *mixer;
     MIX_Track *tracks;
     MIX_GroupMixCallback postmix_callback;
     void *postmix_callback_userdata;
     MIX_Group *prev;  // double-linked list for all_groups.
     MIX_Group *next;
+};
+
+struct MIX_Mixer
+{
+    SDL_AudioStream *output_stream;
+    SDL_AudioSpec spec;
+    SDL_AudioDeviceID device_id;  // can be zero if created from MIX_CreateMixer instead of MIX_CreateMixerDevice.
+    SDL_PropertiesID track_tags;
+    MIX_Group *default_group;
+    MIX_Track *all_tracks;
+    MIX_Track *fire_and_forget_pool;  // these are also listed in all_tracks.
+    MIX_Group *all_groups;
+    MIX_PostMixCallback postmix_callback;
+    void *postmix_callback_userdata;
+    float *mix_buffer;
+    size_t mix_buffer_allocation;
+    float gain;
+    MIX_Mixer *prev;  // double-linked list for all_mixers.
+    MIX_Mixer *next;
 };
 
 // these are not (currently) available in the public API, and may change names or functionality, or be removed.
@@ -111,6 +132,14 @@ struct MIX_Group
 
 #define MIX_DURATION_UNKNOWN -1
 #define MIX_DURATION_INFINITE -2
+
+typedef struct MIX_TagList
+{
+    MIX_Track **tracks;
+    size_t num_tracks;
+    size_t num_allocated;
+    SDL_RWLock *rwlock;
+} MIX_TagList;
 
 // Clamp an IOStream to a subset of its available data...this is used to cut ID3 (etc) tags off
 //  both ends of an audio file, making it look like the file just doesn't have those bytes.

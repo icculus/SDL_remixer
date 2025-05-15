@@ -3,9 +3,16 @@
 #include <SDL3/SDL_main.h>
 #include "SDL3_mixer/SDL_mixer.h"
 
+#define USE_MIX_GENERATE 0
+
 //static SDL_Window *window = NULL;
 //static SDL_Renderer *renderer = NULL;
+static MIX_Mixer *mixer = NULL;
 static MIX_Track *track = NULL;
+
+#if USE_MIX_GENERATE
+static SDL_IOStream *io = NULL;
+#endif
 
 static void LogMetadata(SDL_PropertiesID props, const char *name)
 {
@@ -69,21 +76,33 @@ static int SDLCALL CompareMetadataKeys(const void *a, const void *b)
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
     SDL_SetAppMetadata("Test SDL_mixer", "1.0", "org.libsdl.testmixer");
+#if USE_MIX_GENERATE
+    const SDL_AudioSpec spec = { SDL_AUDIO_S16, 2, 48000 };
+#endif
 
     if (argc != 2) {
         SDL_Log("USAGE: %s <file_to_play>", argv[0]);
         return SDL_APP_FAILURE;
-    } else if (!SDL_Init(SDL_INIT_VIDEO)) {   // it's safe to SDL_INIT_AUDIO, but SDL_mixer will do it for us.
+    } else if (!SDL_Init(SDL_INIT_VIDEO)) {   // it's safe to SDL_INIT_AUDIO, but MIX_Init will do it for us.
+        SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    } else if (!MIX_Init()) {
         SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
         return SDL_APP_FAILURE;
 //    } else if (!SDL_CreateWindowAndRenderer("testmixer", 640, 480, 0, &window, &renderer)) {
 //        SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
 //        return SDL_APP_FAILURE;
-    } else if (!MIX_OpenMixer(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, NULL)) {
+#if USE_MIX_GENERATE
+    } else if ((io = SDL_IOFromFile("dump.raw", "wb")) == NULL) {
+        SDL_Log("Couldn't create dump.raw: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    } else if ((mixer = MIX_CreateMixer(&spec)) == NULL) {
+#else
+    } else if ((mixer = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, NULL)) == NULL) {
+#endif
         SDL_Log("Couldn't create mixer: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
-
 
     SDL_Log("Available decoders:");
     const int num_decoders = MIX_GetNumAudioDecoders();
@@ -99,7 +118,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     SDL_Log("%s", "");
 
     const char *audiofname = argv[1];
-    MIX_Audio *audio = MIX_LoadAudio(audiofname, false);
+    MIX_Audio *audio = MIX_LoadAudio(mixer, audiofname, false);
     if (!audio) {
         SDL_Log("Failed to load '%s': %s", audiofname, SDL_GetError());
         return SDL_APP_FAILURE;
@@ -128,14 +147,14 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     }
     SDL_Log("%s", "");
 
-    track = MIX_CreateTrack();
+    track = MIX_CreateTrack(mixer);
     //const int chmap[] = { 1, 0 }; MIX_SetTrackOutputChannelMap(track, chmap, SDL_arraysize(chmap));
     MIX_SetTrackAudio(track, audio);
     MIX_PlayTrack(track, MIX_TrackMSToFrames(track, 9440), 3, 0, MIX_TrackMSToFrames(track, 6097), MIX_TrackMSToFrames(track, 30000), MIX_TrackMSToFrames(track, 3000));
 //Sint64 maxFrames, int loops, Sint64 startpos, Sint64 loop_start, Sint64 fadeIn, Sint64 append_silence_frames);
 
     // we cheat here with PlayAudio, since the sinewave decoder produces infinite audio.
-    //MIX_PlayAudio(MIX_CreateSineWaveAudio(300, 0.25f));
+    MIX_PlayAudio(mixer, MIX_CreateSineWaveAudio(mixer, 300, 0.25f));
 
     return SDL_APP_CONTINUE;
 }
@@ -150,6 +169,15 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 
 SDL_AppResult SDL_AppIterate(void *appstate)
 {
+    #if USE_MIX_GENERATE
+    float buf[1024];
+    if (!MIX_Generate(mixer, buf, sizeof (buf))) {
+        SDL_Log("MIX_Generate failed: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    SDL_WriteIO(io, buf, sizeof (buf));
+    #endif
+
 //    SDL_RenderClear(renderer);
 //    SDL_RenderPresent(renderer);
 
@@ -171,6 +199,10 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
 {
     // SDL will clean up the window/renderer for us.
     // SDL_mixer will clean up the tracks and audio.
-    MIX_CloseMixer();
+    MIX_Quit();
+
+    #if USE_MIX_GENERATE
+    SDL_CloseIO(io);
+    #endif
 }
 

@@ -1,11 +1,14 @@
 SDL3_mixer_0.0.0 {
   global:
+    MIX_Init;
+    MIX_Quit;
     MIX_Version;
-    MIX_OpenMixer;
-    MIX_CloseMixer;
+    MIX_CreateMixer;
+    MIX_CreateMixerDevice;
+    MIX_DestroyMixer;
     MIX_GetNumAudioDecoders;
     MIX_GetAudioDecoder;
-    MIX_GetDeviceSpec;
+    MIX_GetMixerSpec;
     MIX_LoadAudio_IO;
     MIX_LoadAudio;
     MIX_LoadAudioWithProperties;
@@ -53,5 +56,6 @@ SDL3_mixer_0.0.0 {
     MIX_SetTrackStoppedCallback;
     MIX_SetPostMixCallback;
     MIX_SetTrackMixCallback;
+    MIX_Generate;
   local: *;
 };
