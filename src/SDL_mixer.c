@@ -1437,12 +1437,12 @@ bool MIX_SetTrackPlaybackPosition(MIX_Track *track, Uint64 frames)
     return retval;
 }
 
-Uint64 MIX_GetTrackPlaybackPosition(MIX_Track *track)
+Sint64 MIX_GetTrackPlaybackPosition(MIX_Track *track)
 {
-    Uint64 retval = 0;
+    Sint64 retval = -1;
     if (CheckTrackParam(track)) {
         LockTrack(track);
-        retval = track->position;
+        retval = (Sint64) track->position;
         UnlockTrack(track);
     }
     return retval;

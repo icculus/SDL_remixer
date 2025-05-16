@@ -138,7 +138,7 @@ extern SDL_DECLSPEC bool SDLCALL MIX_TagTrack(MIX_Track *track, const char *tag)
 extern SDL_DECLSPEC void SDLCALL MIX_UntagTrack(MIX_Track *track, const char *tag);  // remove an arbitrary tag from a MIX_Track.
 
 extern SDL_DECLSPEC bool SDLCALL MIX_SetTrackPlaybackPosition(MIX_Track *track, Uint64 frames);  // set source playback position to X sample frames in. Must be fed from a MIX_Audio that can seek, other limitations.
-extern SDL_DECLSPEC Uint64 SDLCALL MIX_GetTrackPlaybackPosition(MIX_Track *track);  // sample frames of audio that have been played from the start of this MIX_Track.
+extern SDL_DECLSPEC Sint64 SDLCALL MIX_GetTrackPlaybackPosition(MIX_Track *track);  // sample frames of audio that have been played from the start of this MIX_Track.
 
 extern SDL_DECLSPEC Uint64 SDLCALL MIX_TrackMSToFrames(MIX_Track *track, Uint64 ms);
 extern SDL_DECLSPEC Uint64 SDLCALL MIX_TrackFramesToMS(MIX_Track *track, Uint64 frames);
