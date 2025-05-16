@@ -117,6 +117,7 @@ extern SDL_DECLSPEC MIX_Audio * SDLCALL MIX_CreateSineWaveAudio(MIX_Mixer *mixer
 
 
 extern SDL_DECLSPEC SDL_PropertiesID SDLCALL MIX_GetAudioProperties(MIX_Audio *audio);  // we can store audio format-specific metadata in here (artist/album/etc info...)
+extern SDL_DECLSPEC Sint64 MIX_GetAudioDuration(MIX_Audio *audio);
 
 extern SDL_DECLSPEC void SDLCALL MIX_DestroyAudio(MIX_Audio *audio);  // reference-counted; if this is playing, it will be _actually_ destroyed when no longer in use.
 
@@ -139,6 +140,11 @@ extern SDL_DECLSPEC void SDLCALL MIX_UntagTrack(MIX_Track *track, const char *ta
 
 extern SDL_DECLSPEC bool SDLCALL MIX_SetTrackPlaybackPosition(MIX_Track *track, Uint64 frames);  // set source playback position to X sample frames in. Must be fed from a MIX_Audio that can seek, other limitations.
 extern SDL_DECLSPEC Sint64 SDLCALL MIX_GetTrackPlaybackPosition(MIX_Track *track);  // sample frames of audio that have been played from the start of this MIX_Track.
+
+extern SDL_DECLSPEC bool SDLCALL MIX_TrackLooping(MIX_Track *track);
+extern SDL_DECLSPEC MIX_Audio * SDLCALL MIX_GetTrackAudio(MIX_Track *track);
+extern SDL_DECLSPEC SDL_AudioStream * SDLCALL MIX_GetTrackAudioStream(MIX_Track *track);
+extern SDL_DECLSPEC Sint64 MIX_GetTrackRemaining(MIX_Track *track);
 
 extern SDL_DECLSPEC Uint64 SDLCALL MIX_TrackMSToFrames(MIX_Track *track, Uint64 ms);
 extern SDL_DECLSPEC Uint64 SDLCALL MIX_TrackFramesToMS(MIX_Track *track, Uint64 frames);

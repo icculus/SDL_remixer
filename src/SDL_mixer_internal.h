@@ -48,6 +48,7 @@ struct MIX_Audio
     SDL_AudioSpec spec;
     const MIX_Decoder *decoder;
     void *decoder_userdata;
+    Sint64 duration_frames;
     MIX_Audio *prev;  // double-linked list for all_audios.
     MIX_Audio *next;
 };

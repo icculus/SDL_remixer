@@ -855,6 +855,7 @@ MIX_Audio *MIX_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
 
     audio->decoder = decoder;
     audio->decoder_userdata = audio_userdata;
+    audio->duration_frames = duration_frames;
 
     if (duration_frames >= 0) {
         SDL_SetNumberProperty(audio->props, MIX_PROP_METADATA_DURATION_FRAMES_NUMBER, duration_frames);
@@ -995,6 +996,7 @@ MIX_Audio *MIX_LoadRawAudio(MIX_Mixer *mixer, const void *data, size_t datalen, 
     }
 
     SDL_assert(duration_frames >= 0);
+    audio->duration_frames = duration_frames;
     SDL_SetNumberProperty(audio->props, MIX_PROP_METADATA_DURATION_FRAMES_NUMBER, duration_frames);
 
     audio->decoder = &MIX_Decoder_RAW;
@@ -1048,6 +1050,11 @@ SDL_PropertiesID MIX_GetAudioProperties(MIX_Audio *audio)
         audio->props = SDL_CreateProperties();
     }
     return audio->props;
+}
+
+Sint64 MIX_GetAudioDuration(MIX_Audio *audio)
+{
+    return CheckAudioParam(audio) ? audio->duration_frames : -1;
 }
 
 static void RefAudio(MIX_Audio *audio)
@@ -1142,7 +1149,6 @@ MIX_Mixer *MIX_GetTrackMixer(MIX_Track *track)
 {
     return CheckTrackParam(track) ? track->mixer : NULL;
 }
-
 
 void MIX_DestroyTrack(MIX_Track *track)
 {
@@ -1443,6 +1449,54 @@ Sint64 MIX_GetTrackPlaybackPosition(MIX_Track *track)
     if (CheckTrackParam(track)) {
         LockTrack(track);
         retval = (Sint64) track->position;
+        UnlockTrack(track);
+    }
+    return retval;
+}
+
+Sint64 MIX_GetTrackRemaining(MIX_Track *track)
+{
+    Sint64 retval = -1;
+    if (CheckTrackParam(track)) {
+        LockTrack(track);
+        const Sint64 position = (Sint64) track->position;
+        const Sint64 duration = track->input_audio ? track->input_audio->duration_frames : -1;
+        UnlockTrack(track);
+        if ((duration >= 0) && (position >= 0) && (position <= duration)) {
+            retval = duration - position;
+        }
+    }
+    return retval;
+}
+
+bool MIX_TrackLooping(MIX_Track *track)
+{
+    bool retval = false;
+    if (CheckTrackParam(track)) {
+        LockTrack(track);
+        retval = (track->loops_remaining != 0);
+        UnlockTrack(track);
+    }
+    return retval;
+}
+
+MIX_Audio *MIX_GetTrackAudio(MIX_Track *track)
+{
+    MIX_Audio *retval = NULL;
+    if (CheckTrackParam(track)) {
+        LockTrack(track);
+        retval = track->input_audio;
+        UnlockTrack(track);
+    }
+    return retval;
+}
+
+SDL_AudioStream *MIX_GetTrackAudioStream(MIX_Track *track)
+{
+    SDL_AudioStream *retval = NULL;
+    if (CheckTrackParam(track)) {
+        LockTrack(track);
+        retval = (track->input_stream != track->internal_stream) ? track->input_stream : NULL;
         UnlockTrack(track);
     }
     return retval;
