@@ -1138,6 +1138,12 @@ static void SDLCALL UntagWholeTrack(void *userdata, SDL_PropertiesID props, cons
     }
 }
 
+MIX_Mixer *MIX_GetTrackMixer(MIX_Track *track)
+{
+    return CheckTrackParam(track) ? track->mixer : NULL;
+}
+
+
 void MIX_DestroyTrack(MIX_Track *track)
 {
     if (!CheckTrackParam(track)) {
@@ -2056,6 +2062,11 @@ void MIX_DestroyGroup(MIX_Group *group)
     UnlockMixer(mixer);
 
     SDL_free(group);
+}
+
+MIX_Mixer *MIX_GetGroupMixer(MIX_Group *group)
+{
+    return CheckGroupParam(group) ? group->mixer : NULL;
 }
 
 bool MIX_SetTrackGroup(MIX_Track *track, MIX_Group *group)

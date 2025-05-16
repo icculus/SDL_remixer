@@ -54,8 +54,15 @@ SDL3_mixer_0.0.0 {
     MIX_GetTrackFrequencyRatio;
     MIX_SetTrackOutputChannelMap;
     MIX_SetTrackStoppedCallback;
+    MIX_CreateGroup;
+    MIX_SetTrackGroup;
+    MIX_DestroyGroup;
+    MIX_GetGroupMixer;
+    MIX_GetTrackMixer;
     MIX_SetPostMixCallback;
-    MIX_SetTrackMixCallback;
+    MIX_SetGroupPostMixCallback;
+    MIX_SetTrackRawCallback;
+    MIX_SetTrackCookedCallback;
     MIX_Generate;
   local: *;
 };
