@@ -150,8 +150,15 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     track = MIX_CreateTrack(mixer);
     //const int chmap[] = { 1, 0 }; MIX_SetTrackOutputChannelMap(track, chmap, SDL_arraysize(chmap));
     MIX_SetTrackAudio(track, audio);
-    MIX_PlayTrack(track, MIX_TrackMSToFrames(track, 9440), 3, 0, MIX_TrackMSToFrames(track, 6097), MIX_TrackMSToFrames(track, 30000), MIX_TrackMSToFrames(track, 3000));
-//Sint64 maxFrames, int loops, Sint64 startpos, Sint64 loop_start, Sint64 fadeIn, Sint64 append_silence_frames);
+
+    SDL_PropertiesID options = SDL_CreateProperties();
+    SDL_SetNumberProperty(options, MIX_PROP_PLAY_MAX_MILLISECONDS_NUMBER, 9440);
+    SDL_SetNumberProperty(options, MIX_PROP_PLAY_LOOPS_NUMBER, 3);
+    SDL_SetNumberProperty(options, MIX_PROP_PLAY_LOOP_START_MILLISECOND_NUMBER, 6097);
+    SDL_SetNumberProperty(options, MIX_PROP_PLAY_FADE_IN_MILLISECONDS_NUMBER, 30000);
+    SDL_SetNumberProperty(options, MIX_PROP_PLAY_APPEND_SILENCE_MILLISECONDS_NUMBER, 30000);
+    MIX_PlayTrack(track, options);
+    SDL_DestroyProperties(options);
 
     // we cheat here with PlayAudio, since the sinewave decoder produces infinite audio.
     MIX_PlayAudio(mixer, MIX_CreateSineWaveAudio(mixer, 300, 0.25f));

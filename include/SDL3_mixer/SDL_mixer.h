@@ -160,12 +160,25 @@ extern SDL_DECLSPEC Uint64 SDLCALL MIX_FramesToMS(int sample_rate, Uint64 frames
 // if (maxFrames >= 0), it halts/loops after X sample frames of playback.
 // if (loops >= 0), it loops this many times then halts (so 0==play once, 1==play twice). if < 0, loop forever.
 // if (fadeIn > 0), it fades in from silence over X milliseconds. If looping, only first iteration fades in.
-extern SDL_DECLSPEC bool SDLCALL MIX_PlayTrack(MIX_Track *track, Sint64 maxFrames, int loops, Sint64 startpos, Sint64 loop_start, Sint64 fadeIn, Sint64 append_silence_frames);
-extern SDL_DECLSPEC bool SDLCALL MIX_PlayTag(MIX_Mixer *mixer, const char *tag, Sint64 maxTicks, int loops, Sint64 fadeIn);  // play everything with this tag.
+extern SDL_DECLSPEC bool SDLCALL MIX_PlayTrack(MIX_Track *track, SDL_PropertiesID options);
+
+#define MIX_PROP_PLAY_LOOPS_NUMBER "SDL_mixer.play.loops"
+#define MIX_PROP_PLAY_MAX_FRAMES_NUMBER "SDL_mixer.play.max_frames"
+#define MIX_PROP_PLAY_MAX_MILLISECONDS_NUMBER "SDL_mixer.play.max_milliseconds"
+#define MIX_PROP_PLAY_START_FRAME_NUMBER "SDL_mixer.play.start_frame"
+#define MIX_PROP_PLAY_START_MILLISECOND_NUMBER "SDL_mixer.play.start_millisecond"
+#define MIX_PROP_PLAY_LOOP_START_FRAME_NUMBER "SDL_mixer.play.loop_start_frame"
+#define MIX_PROP_PLAY_LOOP_START_MILLISECOND_NUMBER "SDL_mixer.play.loop_start_millisecond"
+#define MIX_PROP_PLAY_FADE_IN_FRAMES_NUMBER "SDL_mixer.play.fade_in_frames"
+#define MIX_PROP_PLAY_FADE_IN_MILLISECONDS_NUMBER "SDL_mixer.play.fade_in_milliseconds"
+#define MIX_PROP_PLAY_APPEND_SILENCE_FRAMES_NUMBER "SDL_mixer.play.append_silence_frames"
+#define MIX_PROP_PLAY_APPEND_SILENCE_MILLISECONDS_NUMBER "SDL_mixer.play.append_silence_milliseconds"
+
+extern SDL_DECLSPEC bool SDLCALL MIX_PlayTag(MIX_Mixer *mixer, const char *tag, SDL_PropertiesID options);  // play everything with this tag.
+
 
 // Play a loaded audio file once from start to finish, have SDL_mixer manage a MIX_Track internally for it. This is for fire-and-forget sounds that need _zero_ adjustment, including pausing.
 extern SDL_DECLSPEC bool SDLCALL MIX_PlayAudio(MIX_Mixer *mixer, MIX_Audio *audio);
-
 
 // halt playing audio. If (fadeOut > 0), fade out over X milliseconds before halting. if <= 0, halt immediately.
 extern SDL_DECLSPEC bool SDLCALL MIX_StopTrack(MIX_Track *track, Sint64 fadeOut);  // halt a playing MIX_Track. No-op if not playing.

@@ -1566,39 +1566,63 @@ Uint64 MIX_AudioFramesToMS(MIX_Audio *audio, Uint64 frames)
     return MIX_FramesToMS(audio->spec.freq, frames);
 }
 
-bool MIX_PlayTrack(MIX_Track *track, Sint64 maxFrames, int loops, Sint64 startpos, Sint64 loop_start, Sint64 fadeIn, Sint64 append_silence_frames)
+static Sint64 GetTrackOptionFramesOrTicks(MIX_Track *track, SDL_PropertiesID options, const char *framesprop, const char *msprop, Sint64 defval)
+{
+    if (SDL_HasProperty(options, framesprop)) {
+        return SDL_GetNumberProperty(options, framesprop, defval);
+    } else if (SDL_HasProperty(options, msprop)) {
+        return MIX_TrackMSToFrames(track, SDL_GetNumberProperty(options, msprop, defval));
+    }
+    return defval;
+}
+
+bool MIX_PlayTrack(MIX_Track *track, SDL_PropertiesID options)
 {
     if (!CheckTrackParam(track)) {
         return false;
+    } else if (!track->input_audio && !track->input_stream) {
+        return SDL_SetError("No audio currently assigned to this track");
     }
 
-    bool retval = true;
-
+    int loops = 0;
+    Sint64 max_frames = -1;
+    Sint64 start_pos = 0;
+    Sint64 loop_start = 0;
+    Sint64 fade_in = 0;
+    Sint64 append_silence_frames = 0;
     LockTrack(track);
-    if (!track->input_audio && !track->input_stream) {
-        retval = SDL_SetError("No audio currently assigned to this track");
-    } else if (!track->input_audio && (startpos != 0)) {
-        retval = SDL_SetError("Playing an input stream (not MIX_Audio) with a non-zero startpos");  // !!! FIXME: should we just read off this many frames right now instead?
-    } else if (track->input_audio && (!track->input_audio->decoder->seek(track->decoder_userdata, startpos))) {
-        retval = false;
-    } else {
-        track->max_frames = maxFrames;
-        track->loops_remaining = loops;
-        track->loop_start = loop_start;
-        track->total_fade_frames = (fadeIn > 0) ? fadeIn : 0;
-        track->fade_frames = track->total_fade_frames;
-        track->fade_direction = (fadeIn > 0) ? 1 : 0;
-        track->silence_frames = (append_silence_frames > 0) ? -append_silence_frames : 0;  // negative means "there is still actual audio data to play", positive means "we're done with actual data, feed silence now." Zero means no silence (left) to feed.
-        track->state = MIX_STATE_PLAYING;
-        track->position = startpos;
+    if (options) {
+        loops = (int) SDL_GetNumberProperty(options, MIX_PROP_PLAY_LOOPS_NUMBER, loops);
+        max_frames = GetTrackOptionFramesOrTicks(track, options, MIX_PROP_PLAY_MAX_FRAMES_NUMBER, MIX_PROP_PLAY_MAX_MILLISECONDS_NUMBER, max_frames);
+        start_pos = GetTrackOptionFramesOrTicks(track, options, MIX_PROP_PLAY_START_FRAME_NUMBER, MIX_PROP_PLAY_START_MILLISECOND_NUMBER, start_pos);
+        loop_start = GetTrackOptionFramesOrTicks(track, options, MIX_PROP_PLAY_LOOP_START_FRAME_NUMBER, MIX_PROP_PLAY_LOOP_START_MILLISECOND_NUMBER, loop_start);
+        fade_in = GetTrackOptionFramesOrTicks(track, options, MIX_PROP_PLAY_FADE_IN_FRAMES_NUMBER, MIX_PROP_PLAY_FADE_IN_MILLISECONDS_NUMBER, fade_in);
+        append_silence_frames = GetTrackOptionFramesOrTicks(track, options, MIX_PROP_PLAY_APPEND_SILENCE_FRAMES_NUMBER, MIX_PROP_PLAY_APPEND_SILENCE_MILLISECONDS_NUMBER, append_silence_frames);
     }
+
+    if (track->input_audio && (!track->input_audio->decoder->seek(track->decoder_userdata, start_pos))) {
+        UnlockTrack(track);
+        return false;
+    } else if (!track->input_audio && (start_pos != 0)) {
+        UnlockTrack(track);
+        return SDL_SetError("Playing an input stream (not MIX_Audio) with a non-zero start position");  // !!! FIXME: should we just read off this many frames right now instead?
+    }
+
+    track->max_frames = max_frames;
+    track->loops_remaining = loops;
+    track->loop_start = loop_start;
+    track->total_fade_frames = (fade_in > 0) ? fade_in : 0;
+    track->fade_frames = track->total_fade_frames;
+    track->fade_direction = (fade_in > 0) ? 1 : 0;
+    track->silence_frames = (append_silence_frames > 0) ? -append_silence_frames : 0;  // negative means "there is still actual audio data to play", positive means "we're done with actual data, feed silence now." Zero means no silence (left) to feed.
+    track->state = MIX_STATE_PLAYING;
+    track->position = start_pos;
 
     UnlockTrack(track);
-
-    return retval;
+    return true;
 }
 
-bool MIX_PlayTag(MIX_Mixer *mixer, const char *tag, Sint64 maxTicks, int loops, Sint64 fadeIn)
+bool MIX_PlayTag(MIX_Mixer *mixer, const char *tag, SDL_PropertiesID options)
 {
     if (!CheckMixerTagParam(mixer, tag)) {
         return false;
@@ -1612,18 +1636,18 @@ bool MIX_PlayTag(MIX_Mixer *mixer, const char *tag, Sint64 maxTicks, int loops, 
     bool retval = true;
     SDL_LockRWLockForReading(list->rwlock);
     const size_t total = list->num_tracks;
+    LockMixer(mixer);  // so all tracks start at the same time.
+
     for (size_t i = 0; i < total; i++) {
         MIX_Track *track = list->tracks[i];
-        LockTrack(track);
-        if (!MIX_PlayTrack(track,
-                           (maxTicks > 0) ? MIX_TrackMSToFrames(track, maxTicks) : -1,
-                           loops, 0, 0,
-                           (fadeIn > 0) ? MIX_TrackMSToFrames(track, fadeIn) : -1, 0)) {
-            retval = false;
+        if (track->input_audio || track->input_stream) {  // don't treat it as an error if no audio is available, just don't play it.
+            if (!MIX_PlayTrack(track, options)) {
+                retval = false;
+            }
         }
-        UnlockTrack(track);
     }
 
+    UnlockMixer(mixer);
     SDL_UnlockRWLock(list->rwlock);
 
     return retval;
@@ -1657,7 +1681,7 @@ bool MIX_PlayAudio(MIX_Mixer *mixer, MIX_Audio *audio)
         return false;
     }
 
-    const bool retval = MIX_PlayTrack(track, -1, 0, 0, 0, 0, 0);
+    const bool retval = MIX_PlayTrack(track, 0);
 
     // !!! FIXME: MIX_PlayTrack should only fail for things we already validated here...but if this assertion fires, we need to put this track back in the fire/forget pool.
     SDL_assert(retval);
