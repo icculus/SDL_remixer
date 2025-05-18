@@ -24,7 +24,6 @@
 #include "SDL_mixer_internal.h"
 
 #define MPG123_ENUM_API /* for mpg123_param() */
-#define MPG123_NO_LARGENAME /* disable the _FILE_OFFSET_BITS suffixes. */
 #include <stdio.h>  // SEEK_SET
 #include <mpg123.h>
 
