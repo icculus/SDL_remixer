@@ -460,7 +460,7 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
         }
 
         if (group->postmix_callback) {
-            group->postmix_callback(group->postmix_callback_userdata, group, &mixer->spec, group_mixbuf, additional_amount);
+            group->postmix_callback(group->postmix_callback_userdata, group, &mixer->spec, group_mixbuf, additional_amount / sizeof (float));
         }
 
         if (!skip_group_mixing) {
