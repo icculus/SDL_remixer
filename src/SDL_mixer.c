@@ -310,7 +310,7 @@ static void SDLCALL TrackGetCallback(void *userdata, SDL_AudioStream *stream, in
 
             // if this would put us past the end of maxframes, or a fadeout, clamp br and set end_of_audio=true so we can do looping, etc.
             Sint64 maxpos = -1;
-            if (track->max_frames > 0) {
+            if (track->max_frames >= 0) {
                 maxpos = track->max_frames;
             }
             if (track->fade_direction < 0) {
