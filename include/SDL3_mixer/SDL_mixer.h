@@ -234,8 +234,8 @@ extern SDL_DECLSPEC bool SDLCALL MIX_SetTrackCookedCallback(MIX_Track *track, MI
 
 typedef void (SDLCALL *MIX_GroupMixCallback)(void *userdata, MIX_Group *group, const SDL_AudioSpec *spec, float *pcm, int samples);
 extern SDL_DECLSPEC bool SDLCALL MIX_SetGroupPostMixCallback(MIX_Group *group, MIX_GroupMixCallback cb, void *userdata);  // is called when a group of tracks has been mixed, before it mixes with other groups. This is the mixed data of all "cooked" tracks in the group.
-typedef void (SDLCALL *MIX_PostMixCallback)(void *userdata, MIX_Mixer *mixer, const SDL_AudioSpec *spec, float *pcm, int buflen);
-extern SDL_DECLSPEC bool SDLCALL MIX_SetPostMixCallback(MIX_Mixer *mixer, MIX_PostMixCallback cb, void *userdata);  // just calls the standard SDL postmix callback, as mixed data is going to the audio hardware to be played!
+typedef void (SDLCALL *MIX_PostMixCallback)(void *userdata, MIX_Mixer *mixer, const SDL_AudioSpec *spec, float *pcm, int samples);
+extern SDL_DECLSPEC bool SDLCALL MIX_SetPostMixCallback(MIX_Mixer *mixer, MIX_PostMixCallback cb, void *userdata);  // called as mixed data is going to the audio hardware to be played!
 
 // can only call this if mixer came from MIX_CreateMixer() instead of MIX_CreateMixerDevice(). `buflen` must be a multiple of the output frame size! Will run as fast as you let it!
 extern SDL_DECLSPEC bool MIX_Generate(MIX_Mixer *mixer, float *buffer, int buflen);
