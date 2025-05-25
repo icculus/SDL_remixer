@@ -694,7 +694,7 @@ const char *MIX_GetAudioDecoder(int index)
     return available_decoders[index]->name;
 }
 
-bool MIX_GetMixerSpec(MIX_Mixer *mixer, SDL_AudioSpec *spec)
+bool MIX_GetMixerFormat(MIX_Mixer *mixer, SDL_AudioSpec *spec)
 {
     if (!CheckMixerParam(mixer)) {
         return false;

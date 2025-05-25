@@ -8,7 +8,7 @@ SDL3_mixer_0.0.0 {
     MIX_DestroyMixer;
     MIX_GetNumAudioDecoders;
     MIX_GetAudioDecoder;
-    MIX_GetMixerSpec;
+    MIX_GetMixerFormat;
     MIX_LoadAudio_IO;
     MIX_LoadAudio;
     MIX_LoadAudioWithProperties;

@@ -104,6 +104,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         return SDL_APP_FAILURE;
     }
 
+    SDL_AudioSpec mixerspec;
+    MIX_GetMixerFormat(mixer, &mixerspec);
+    SDL_Log("Mixer is format %s, %d channels, %d frequency", SDL_GetAudioFormatName(mixerspec.format), mixerspec.channels, mixerspec.freq);
+
     SDL_Log("Available decoders:");
     const int num_decoders = MIX_GetNumAudioDecoders();
     if (num_decoders < 0) {

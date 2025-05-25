@@ -83,7 +83,7 @@ extern SDL_DECLSPEC MIX_Mixer * SDLCALL MIX_CreateMixerDevice(SDL_AudioDeviceID 
 extern SDL_DECLSPEC MIX_Mixer * SDLCALL MIX_CreateMixer(const SDL_AudioSpec *spec);  // we want a mixer that will generate audio through an SDL_AudioStream we can consume from on-demand.
 extern SDL_DECLSPEC void SDLCALL MIX_DestroyMixer(MIX_Mixer *mixer);
 
-extern SDL_DECLSPEC bool SDLCALL MIX_GetMixerSpec(MIX_Mixer *mixer, SDL_AudioSpec *spec);   // what the device is actually expecting/what the mixer is generating.
+extern SDL_DECLSPEC bool SDLCALL MIX_GetMixerFormat(MIX_Mixer *mixer, SDL_AudioSpec *spec);   // what the device is actually expecting/what the mixer is generating.
 
 // there is no difference between sounds and "music" now. They're all MIX_Audio objects.
 extern SDL_DECLSPEC MIX_Audio * SDLCALL MIX_LoadAudio_IO(MIX_Mixer *mixer, SDL_IOStream *io, bool predecode, bool closeio);
