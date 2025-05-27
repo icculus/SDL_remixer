@@ -279,6 +279,7 @@ static void SDLCALL TrackGetCallback(void *userdata, SDL_AudioStream *stream, in
     }
 
     float *pcm = track->input_buffer;  // we always work in float32 format.
+    const int output_framesize = SDL_AUDIO_FRAMESIZE(track->output_spec);
     int bytes_remaining = additional_amount;
 
     // Calling TrackStopped() might have a stopped_callback that restarts the track, so don't break the loop
@@ -286,6 +287,9 @@ static void SDLCALL TrackGetCallback(void *userdata, SDL_AudioStream *stream, in
     while ((track->state == MIX_STATE_PLAYING) && (bytes_remaining > 0)) {
         bool end_of_audio = false;
         int br = 0;   // bytes read.
+
+        // make sure we're not trying to read half a sample frame.
+        bytes_remaining = SDL_max(bytes_remaining, output_framesize);
 
         if (track->silence_frames > 0) {
             br = FillSilenceFrames(track, pcm, bytes_remaining);
