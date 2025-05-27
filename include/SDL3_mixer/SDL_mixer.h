@@ -213,9 +213,22 @@ extern SDL_DECLSPEC bool SDLCALL MIX_SetTagGain(MIX_Mixer *mixer, const char *ta
 extern SDL_DECLSPEC bool SDLCALL MIX_SetTrackFrequencyRatio(MIX_Track *track, float ratio);  // speed up or slow down track playback. 1.0f is normal speed, 2.0f is double speed 0.5f is half speed, etc.
 extern SDL_DECLSPEC float SDLCALL MIX_GetTrackFrequencyRatio(MIX_Track *track);
 
-
 // channel maps...
 extern SDL_DECLSPEC bool SDLCALL MIX_SetTrackOutputChannelMap(MIX_Track *track, const int *chmap, int count);
+
+
+// positional audio...
+typedef struct MIX_Point3D
+{
+    float x;
+    float y;
+    float z;
+} MIX_Point3D;
+
+// spatializes audio. Right handed coordinate system like OpenGL/OpenAL. Listener is always at 0,0,0. Audio will collapse down to mono and be positioned with distance attenuation. position=NULL turns off spatialization (default).
+extern SDL_DECLSPEC bool SDLCALL MIX_SetTrack3DPosition(MIX_Track *track, const MIX_Point3D *position);
+extern SDL_DECLSPEC bool SDLCALL MIX_GetTrack3DPosition(MIX_Track *track, MIX_Point3D *position);  // will return (0,0,0) if MIX_SetTrack3DPosition was given a NULL (or was never called for the track).
+
 
 // groups...
 extern SDL_DECLSPEC MIX_Group * SDLCALL MIX_CreateGroup(MIX_Mixer *mixer);

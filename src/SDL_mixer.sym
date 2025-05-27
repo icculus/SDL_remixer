@@ -69,5 +69,7 @@ SDL3_mixer_0.0.0 {
     MIX_GetTrackAudio;
     MIX_GetTrackAudioStream;
     MIX_GetTrackRemaining;
+    MIX_SetTrack3DPosition;
+    MIX_GetTrack3DPosition;
   local: *;
 };

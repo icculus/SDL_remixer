@@ -84,6 +84,11 @@ static MIX_Mixer *all_mixers = NULL;
 static MIX_Audio *all_audios = NULL;
 static SDL_Mutex *global_lock = NULL;
 
+#if defined(SDL_NEON_INTRINSICS) && SDL_MIXER_NEED_SCALAR_FALLBACK
+bool MIX_HasNEON = false;
+#endif
+
+
 static void LockGlobal(void)
 {
     SDL_LockMutex(global_lock);
@@ -94,6 +99,29 @@ static void UnlockGlobal(void)
     SDL_UnlockMutex(global_lock);
 }
 
+static void LockMixer(MIX_Mixer *mixer)
+{
+    SDL_LockAudioStream(mixer->output_stream);
+}
+
+static void UnlockMixer(MIX_Mixer *mixer)
+{
+    SDL_UnlockAudioStream(mixer->output_stream);
+}
+
+static void LockTrack(MIX_Track *track)
+{
+    SDL_assert(track != NULL);
+    SDL_assert(track->output_stream != NULL);
+    SDL_LockAudioStream(track->output_stream);
+}
+
+static void UnlockTrack(MIX_Track *track)
+{
+    SDL_assert(track != NULL);
+    SDL_assert(track->output_stream != NULL);
+    SDL_UnlockAudioStream(track->output_stream);
+}
 
 static bool CheckInitialized(void)
 {
@@ -138,14 +166,51 @@ CHECKTAGPLUSPARAM(MIX_Track, Track, track)
 #undef CHECKTAGPLUSPARAM
 
 
-static void LockMixer(MIX_Mixer *mixer)
+static bool SetTrackOutputStreamFormat(MIX_Track *track, const SDL_AudioSpec *spec)
 {
-    SDL_LockAudioStream(mixer->output_stream);
+    SDL_copyp(&track->output_spec, &track->mixer->spec);
+    if (track->spatialized) {
+        track->output_spec.channels = 1;
+    }
+    const bool retval = SDL_SetAudioStreamFormat(track->output_stream, spec, &track->output_spec);   // input is `spec`, output is to mixer->output_stream (or, if spatializing, to mixer->output_stream but mono).
+    SDL_assert(retval != false);
+    return retval;
 }
 
-static void UnlockMixer(MIX_Mixer *mixer)
+// catch events to see if output device format has changed. This can let us move to/from surround sound support on the fly, not to mention spend less time doing unnecessary conversions.
+static bool SDLCALL AudioDeviceChangeEventWatcher(void *userdata, SDL_Event *event)
 {
-    SDL_UnlockAudioStream(mixer->output_stream);
+    MIX_Mixer *mixer = (MIX_Mixer *) userdata;
+    if (event->type != SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED) {
+        return true;  // don't care about this event.
+    } else if (mixer->device_id == event->adevice.which) {
+        return true;  // don't care about this device.
+    } else if (mixer->device_id == 0) {
+        return true;  // don't care about this mixer.
+    }
+
+    SDL_Log("Changing mixer output format!!");
+
+    LockMixer(mixer);
+
+    // just all our output streams to the new format.
+    if (SDL_GetAudioStreamFormat(mixer->output_stream, NULL, &mixer->spec)) {
+        mixer->spec.format = SDL_AUDIO_F32;
+        if (SDL_SetAudioStreamFormat(mixer->output_stream, &mixer->spec, NULL)) {
+            MIX_VBAP2D_Init(&mixer->vbap2d, mixer->spec.channels);  // deal with channel count changing.
+            for (MIX_Track *track = mixer->all_tracks; track; track = track->next) {
+                LockTrack(track);
+                SetTrackOutputStreamFormat(track, NULL);   // input is from internal_stream, output is to mixer->output_stream (or, if spatializing, to mixer->output_stream but mono).
+                if (track->spatialized) {  // deal with channel count changing.
+                    MIX_Spatialize(&track->mixer->vbap2d, track->position3d, track->spatialization_panning, track->spatialization_speakers);
+                }
+                UnlockTrack(track);
+            }
+        }
+    }
+
+    UnlockMixer(mixer);
+    return true;
 }
 
 // this assumes LockTrack(track) was called before this.
@@ -336,7 +401,7 @@ static void SDLCALL TrackGetCallback(void *userdata, SDL_AudioStream *stream, in
                 }
             }
 
-            // give the app a shot at the final buffer before sending it on for mixing
+            // give the app a shot at the final buffer before sending it on through transformations.
             const int samples = frames_read * channels;
 
             if (track->raw_callback) {
@@ -387,6 +452,22 @@ static void SDLCALL TrackGetCallback(void *userdata, SDL_AudioStream *stream, in
     }
 }
 
+static void MixSpatializedFloat32Audio(float *dst, const float *src, const int samples, const int output_channels, const float *panning, const int *speakers, const float gain)
+{
+    const float panning0 = panning[0] * gain;
+    const float panning1 = panning[1] * gain;
+    const int speaker0 = speakers[0];
+    const int speaker1 = speakers[1];
+
+    // !!! FIXME: a common case (output_channels==2, speaker0=0, speaker1=1) can be easily SIMD'd.
+    // !!! FIXME: unroll this loop?
+    for (int i = 0; i < samples; i++, dst += output_channels, src++) {
+        const float sample = *src;
+        dst[speaker0] += sample * panning0;
+        dst[speaker1] += sample * panning1;
+    }
+}
+
 static void MixFloat32Audio(float *dst, const float *src, const int buffer_size, const float gain)
 {
     if (!SDL_MixAudio((Uint8 *) dst, (const Uint8 *) src, SDL_AUDIO_F32, buffer_size, gain)) {
@@ -402,22 +483,6 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
     }
 
     MIX_Mixer *mixer = (MIX_Mixer *) userdata;
-
-#if 0 // !!! FIXME: install an event listener for this.
-    SDL_AudioSpec src_spec, dst_spec;
-    if (!SDL_GetAudioStreamFormat(stream, &src_spec, &dst_spec)) {
-        return;  // oh well.
-    } else {
-        if (SDL_memcmp(&src_spec, &dst_spec, sizeof (src_spec)) != 0) {  // device format changed?
-            // try to adjust additional_amount, since the request was for the previous source spec...
-            additional_amount /= SDL_AUDIO_FRAMESIZE(src_spec);  // convert bytes to sample_frames
-            additional_amount = (int) ((float) additional_amount * (((float) dst_spec.freq) / ((float) src_spec.freq)));
-            additional_amount *= SDL_AUDIO_FRAMESIZE(dst_spec);  // convert bytes to sample_frames
-            // the group stream accepts and mixes input in device format, no conversion.
-            SDL_SetAudioStreamFormat(stream, &dst_spec, NULL);  // all the tracks' output format would have already changed, so we're uniform here now.
-        }
-    }
-#endif
 
     // it should be asking for float data...
     SDL_assert((additional_amount % sizeof (float)) == 0);
@@ -454,15 +519,26 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
         int group_bytes = 0;
         MIX_Track *next_track = NULL;
         for (MIX_Track *track = group->tracks; track; track = next_track) {
+            SDL_assert(track->output_spec.format == SDL_AUDIO_F32);
+            SDL_assert(track->output_spec.freq == mixer->spec.freq);
+
             next_track = track->group_next;  // this won't save you from a callback going totally rogue, but it'll deal with the current track leaving the group.
-            const int br = SDL_GetAudioStreamData(track->output_stream, getbuf, additional_amount);
+            const int to_be_read = (additional_amount / SDL_AUDIO_FRAMESIZE(mixer->spec)) * SDL_AUDIO_FRAMESIZE(track->output_spec);
+            const int br = SDL_GetAudioStreamData(track->output_stream, getbuf, to_be_read);
             if (br > 0) {
-                group_bytes = SDL_max(group_bytes, br);
                 if (track->cooked_callback) {
-                    SDL_assert(track->output_spec.format == SDL_AUDIO_F32);
                     track->cooked_callback(track->cooked_callback_userdata, track, &track->output_spec, getbuf, br / sizeof (float));
                 }
-                MixFloat32Audio(group_mixbuf, getbuf, br, mixer->gain);
+
+                if (track->spatialized) {
+                    SDL_assert(track->output_spec.channels == 1);
+                    MixSpatializedFloat32Audio(group_mixbuf, getbuf, br / sizeof (float), mixer->spec.channels, track->spatialization_panning, track->spatialization_speakers, mixer->gain);
+                    group_bytes = SDL_max(group_bytes, br * mixer->spec.channels);
+                } else {
+                    SDL_assert(track->output_spec.channels == mixer->spec.channels);
+                    MixFloat32Audio(group_mixbuf, getbuf, br, mixer->gain);
+                    group_bytes = SDL_max(group_bytes, br);
+                }
             }
         }
 
@@ -524,6 +600,23 @@ bool MIX_Init(void)
         if (!SDL_Init(SDL_INIT_AUDIO)) {
             return false;
         }
+
+        #if defined(SDL_SSE_INTRINSICS)   // we assume you have SSE if you're on an Intel CPU.
+        if (!SDL_HasSSE()) {
+            SDL_QuitSubSystem(SDL_INIT_AUDIO);
+            return SDL_SetError("Need SSE instructions but this CPU doesn't offer it");  // whoa! Better order a new Pentium III from Gateway 2000!
+        }
+        #endif
+
+        #if defined(SDL_NEON_INTRINSICS) && !NEED_SCALAR_FALLBACK
+        if (!SDL_HasNEON()) {
+            SDL_QuitSubSystem(SDL_INIT_AUDIO);
+            return SDL_SetError("Need NEON instructions but this CPU doesn't offer it");  // :(
+        }
+        #elif defined(SDL_NEON_INTRINSICS) && NEED_SCALAR_FALLBACK
+        MIX_HasNEON = SDL_HasNEON();
+        #endif
+
         global_lock = SDL_CreateMutex();
         if (!global_lock) {
             SDL_QuitSubSystem(SDL_INIT_AUDIO);
@@ -579,7 +672,8 @@ static MIX_Mixer *CreateMixer(SDL_AudioStream *stream)
         goto failed;
     }
 
-    if (!SDL_GetAudioStreamFormat(stream, &mixer->spec, NULL)) {
+    SDL_AudioSpec output_spec;
+    if (!SDL_GetAudioStreamFormat(stream, &mixer->spec, &output_spec)) {
         goto failed;
     }
 
@@ -605,6 +699,8 @@ static MIX_Mixer *CreateMixer(SDL_AudioStream *stream)
     mixer->output_stream = stream;
 
     SDL_SetAudioStreamGetCallback(stream, MixerCallback, mixer);
+
+    MIX_VBAP2D_Init(&mixer->vbap2d, output_spec.channels);
 
     LockGlobal();
     mixer->next = all_mixers;
@@ -646,6 +742,7 @@ MIX_Mixer *MIX_CreateMixerDevice(SDL_AudioDeviceID devid, const SDL_AudioSpec *s
     MIX_Mixer *mixer = CreateMixer(SDL_OpenAudioDeviceStream(devid, spec, NULL, NULL));
     if (mixer) {
         mixer->device_id = SDL_GetAudioStreamDevice(mixer->output_stream);
+        SDL_AddEventWatch(AudioDeviceChangeEventWatcher, mixer);
         SDL_ResumeAudioStreamDevice(mixer->output_stream);
     }
 
@@ -677,6 +774,10 @@ void MIX_DestroyMixer(MIX_Mixer *mixer)
 
     while (mixer->all_groups) {
         MIX_DestroyGroup(mixer->all_groups);
+    }
+
+    if (mixer->device_id) {
+        SDL_RemoveEventWatch(AudioDeviceChangeEventWatcher, mixer);
     }
 
     SDL_DestroyAudioStream(mixer->output_stream);
@@ -1108,10 +1209,12 @@ MIX_Track *MIX_CreateTrack(MIX_Mixer *mixer)
         return NULL;
     }
 
-    MIX_Track *track = (MIX_Track *) SDL_calloc(1, sizeof (*track));
+    // this makes sure track->position is aligned for SIMD access.
+    MIX_Track *track = (MIX_Track *) SDL_aligned_alloc(SDL_GetSIMDAlignment(), sizeof (*track));
     if (!track) {
         return NULL;
     }
+    SDL_zerop(track);
 
     track->tags = SDL_CreateProperties();
     if (!track->tags) {
@@ -1202,21 +1305,7 @@ void MIX_DestroyTrack(MIX_Track *track)
     SDL_EnumerateProperties(track->tags, UntagWholeTrack, track);
     SDL_DestroyProperties(track->tags);
     SDL_free(track->input_buffer);
-    SDL_free(track);
-}
-
-static void LockTrack(MIX_Track *track)
-{
-    SDL_assert(track != NULL);
-    SDL_assert(track->output_stream != NULL);
-    SDL_LockAudioStream(track->output_stream);
-}
-
-static void UnlockTrack(MIX_Track *track)
-{
-    SDL_assert(track != NULL);
-    SDL_assert(track->output_stream != NULL);
-    SDL_UnlockAudioStream(track->output_stream);
+    SDL_aligned_free(track);
 }
 
 bool MIX_SetTrackAudio(MIX_Track *track, MIX_Audio *audio)
@@ -1259,8 +1348,7 @@ bool MIX_SetTrackAudio(MIX_Track *track, MIX_Audio *audio)
         if (retval) {
             RefAudio(audio);
             SDL_SetAudioStreamFormat(track->internal_stream, &audio->spec, &spec);   // input is from decoded audio, output is to output_stream
-            SDL_SetAudioStreamFormat(track->output_stream, &spec, &track->mixer->spec);   // input is from internal_stream, output is to mixer->output_stream.
-            SDL_copyp(&track->output_spec, &spec);
+            SetTrackOutputStreamFormat(track, &spec);   // input is from internal_stream, output is to mixer->output_stream (or, if spatializing, to mixer->output_stream but mono).
             track->input_audio = audio;
             track->input_stream = track->internal_stream;
             SDL_ClearAudioStream(track->input_stream);   // make sure that any extra buffered input from before is removed.
@@ -1285,12 +1373,16 @@ bool MIX_SetTrackAudioStream(MIX_Track *track, SDL_AudioStream *stream)
         track->input_audio->decoder->quit_track(track->decoder_userdata);
         UnrefAudio(track->input_audio);
         track->input_audio = NULL;
+        if (track->internal_stream) {
+            SDL_ClearAudioStream(track->internal_stream);   // make sure that any extra buffered input is removed.
+        }
     }
 
-    SDL_GetAudioStreamFormat(stream, &track->output_spec, NULL);
-    track->output_spec.format = SDL_AUDIO_F32;  // we always work in float32.
-    SDL_SetAudioStreamFormat(stream, NULL, &track->output_spec);                 // input is whatever, output is whatever in float format.
-    SDL_SetAudioStreamFormat(track->output_stream, &track->output_spec, NULL);   // input is whatever in float format, output is whatever the audio device wants.
+    SDL_AudioSpec spec;
+    SDL_GetAudioStreamFormat(stream, &spec, NULL);
+    spec.format = SDL_AUDIO_F32;  // we always work in float32.
+    SDL_SetAudioStreamFormat(stream, NULL, &spec);                 // input is whatever, output is whatever in float format.
+    SetTrackOutputStreamFormat(track, &spec);   // input is whatever in float format, output is to mixer->output_stream (or, if spatializing, to mixer->output_stream but mono).
     track->input_stream = stream;
     track->position = 0;
     UnlockTrack(track);
@@ -2060,6 +2152,57 @@ bool MIX_SetTrackOutputChannelMap(MIX_Track *track, const int *chmap, int count)
     //UnlockTrack(track);
 
     return retval;
+}
+
+bool MIX_SetTrack3DPosition(MIX_Track *track, const MIX_Point3D *position)
+{
+    if (!CheckTrackParam(track)) {
+        return false;
+    }
+
+    LockTrack(track);
+
+    const bool wants_spatialization = (position != NULL);
+    const bool toggling = (track->spatialized != wants_spatialization);
+    if (toggling) {
+        track->spatialized = wants_spatialization;
+        SetTrackOutputStreamFormat(track, NULL);   // change output format to mono (or back to normal) if necessary.
+    }
+
+    if (!position) {
+        track->position3d[0] = track->position3d[1] = track->position3d[2] = 0.0f;
+    } else {
+        float *tposition3d = track->position3d;
+        if (toggling || ((tposition3d[0] != position->x) || (tposition3d[2] != position->y) || (tposition3d[2] != position->z))) {
+            tposition3d[0] = position->x;
+            tposition3d[1] = position->y;
+            tposition3d[2] = position->z;
+            MIX_Spatialize(&track->mixer->vbap2d, tposition3d, track->spatialization_panning, track->spatialization_speakers);
+        }
+    }
+
+    UnlockTrack(track);
+
+    return true;
+}
+
+bool MIX_GetTrack3DPosition(MIX_Track *track, MIX_Point3D *position)
+{
+    if (!CheckTrackParam(track)) {
+        return false;
+    } else if (!position) {
+        return SDL_InvalidParamError("position");
+    }
+
+    LockTrack(track);
+    const float *tposition3d = track->position3d;
+    position->x = tposition3d[0];
+    position->y = tposition3d[1];
+    position->z = tposition3d[2];
+    UnlockTrack(track);
+
+    return true;
+
 }
 
 bool MIX_SetPostMixCallback(MIX_Mixer *mixer, MIX_PostMixCallback cb, void *userdata)

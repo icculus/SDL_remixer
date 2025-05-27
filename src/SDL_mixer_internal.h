@@ -19,7 +19,63 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
+/* This is for debugging and/or pulling the fire alarm. */
+#ifndef SDL_MIXER_FORCE_SCALAR_FALLBACK
+#  define SDL_MIXER_FORCE_SCALAR_FALLBACK 0
+#endif
+#if SDL_MIXER_FORCE_SCALAR_FALLBACK
+#  define SDL_DISABLE_SSE
+#  define SDL_DISABLE_NEON
+#endif
+
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_intrin.h>
+
+#if defined(SDL_SSE_INTRINSICS)  /* if you are on x86 or x86-64, we assume you have SSE1 by now. */
+#define SDL_MIXER_NEED_SCALAR_FALLBACK 0
+#elif defined(SDL_NEON_INTRINSICS) && (defined(__ARM_ARCH) && (__ARM_ARCH >= 8))  /* ARMv8 always has NEON. */
+#define SDL_MIXER_NEED_SCALAR_FALLBACK 0
+#elif defined(SDL_NEON_INTRINSICS) && (defined(__APPLE__) && defined(__ARM_ARCH) && (__ARM_ARCH >= 7))   /* All ARMv7 chips from Apple have NEON. */
+#define SDL_MIXER_NEED_SCALAR_FALLBACK 0
+#elif defined(SDL_NEON_INTRINSICS) && (defined(__WINDOWS__) || defined(__WINRT__)) && defined(_M_ARM)  /* all WinRT-level Microsoft devices have NEON */
+#define SDL_MIXER_NEED_SCALAR_FALLBACK 0
+#else
+#define SDL_MIXER_NEED_SCALAR_FALLBACK 1
+#endif
+
+#if defined(SDL_SSE_INTRINSICS)   /* we assume you always have this on x86/x86-64 chips. SSE1 is 20+ years old! */
+#define MIX_HasSSE 1
+#endif
+
+#if defined(SDL_NEON_INTRINSICS)
+#if SDL_MIXER_NEED_SCALAR_FALLBACK
+extern bool MIX_HasNEON;
+#else
+#define MIX_HasNEON 1
+#endif
+#endif
+
 #include "SDL3_mixer/SDL_mixer.h"
+
+// Vector Based Amplitude Panning stuff, for surround sound positional audio.
+// VBAP code originally from https://github.com/drbafflegab/vbap/ ... CC0 license (public domain).
+#define MIX_VBAP2D_MAX_RESOLUTION 3600
+#define MIX_VBAP2D_MAX_SPEAKER_COUNT 8   // original code had 64, assumed you'd use less, but we're hardcoding our current maximum.
+#define MIX_VBAP2D_RESOLUTION 36   // 10 degrees per division
+
+typedef struct MIX_VBAP2D_Bucket { Uint8 speaker_pair; } MIX_VBAP2D_Bucket;
+typedef struct MIX_VBAP2D_Matrix { float a00, a01, a10, a11; } MIX_VBAP2D_Matrix;
+
+typedef struct MIX_VBAP2D
+{
+    int speaker_count;
+    MIX_VBAP2D_Bucket buckets[MIX_VBAP2D_RESOLUTION];
+    MIX_VBAP2D_Matrix matrices[MIX_VBAP2D_MAX_SPEAKER_COUNT-1];   // the upper ones all have an LFE channel, which we don't track here, so minus one.
+} MIX_VBAP2D;
+
+void MIX_VBAP2D_Init(MIX_VBAP2D *vbap2d, int speaker_count);
+
+
 
 typedef struct MIX_Decoder
 {
@@ -55,6 +111,10 @@ struct MIX_Audio
 
 struct MIX_Track
 {
+    float position3d[4] SDL_ALIGNED(16);   // we only need the X, Y, and Z coords, but the 4th element makes this SIMD-friendly.
+    bool spatialized;
+    float spatialization_panning[2];
+    int spatialization_speakers[2];
     MIX_Mixer *mixer;
     float *input_buffer;  // a place to process audio as it progresses through the callback.
     size_t input_buffer_len;  // number of bytes allocated to input_buffer.
@@ -114,6 +174,7 @@ struct MIX_Mixer
     float *mix_buffer;
     size_t mix_buffer_allocation;
     float gain;
+    MIX_VBAP2D vbap2d;
     MIX_Mixer *prev;  // double-linked list for all_mixers.
     MIX_Mixer *next;
 };
@@ -172,6 +233,10 @@ extern bool MIX_ReadMetadataTags(SDL_IOStream *io, SDL_PropertiesID props, MIX_I
 
 // Various Ogg-based decoders use this (Vorbis, FLAC, Opus, etc).
 void MIX_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, const char * const *user_comments, int num_comments, Sint64 *loop_start, Sint64 *loop_end, Sint64 *loop_len);
+
+// `panning` and `speakers` need to be arrays of 2 elements each, to be filled in with what speakers to write to, and at what gain. `position` must be 16 bytes (only 12 are used), aligned to 16 bytes.
+void MIX_Spatialize(const MIX_VBAP2D *vbap2d, const float *position, float *panning, int *speakers);
+
 
 // these might not all be available, but they are all declared here as if they are.
 extern MIX_Decoder MIX_Decoder_VOC;
