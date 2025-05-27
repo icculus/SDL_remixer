@@ -116,6 +116,7 @@ struct MIX_Track
     float spatialization_panning[2];
     int spatialization_speakers[2];
     MIX_Mixer *mixer;
+    SDL_PropertiesID props;
     float *input_buffer;  // a place to process audio as it progresses through the callback.
     size_t input_buffer_len;  // number of bytes allocated to input_buffer.
     MIX_Audio *input_audio;    // non-NULL if used with MIX_SetTrackAudioStream. Holds a reference.
@@ -153,6 +154,7 @@ struct MIX_Group
 {
     MIX_Mixer *mixer;
     MIX_Track *tracks;
+    SDL_PropertiesID props;
     MIX_GroupMixCallback postmix_callback;
     void *postmix_callback_userdata;
     MIX_Group *prev;  // double-linked list for all_groups.
@@ -164,6 +166,7 @@ struct MIX_Mixer
     SDL_AudioStream *output_stream;
     SDL_AudioSpec spec;
     SDL_AudioDeviceID device_id;  // can be zero if created from MIX_CreateMixer instead of MIX_CreateMixerDevice.
+    SDL_PropertiesID props;
     SDL_PropertiesID track_tags;
     MIX_Group *default_group;
     MIX_Track *all_tracks;

@@ -82,6 +82,7 @@ extern SDL_DECLSPEC const char * SDLCALL MIX_GetAudioDecoder(int index);  // "WA
 extern SDL_DECLSPEC MIX_Mixer * SDLCALL MIX_CreateMixerDevice(SDL_AudioDeviceID devid, const SDL_AudioSpec *spec);  // we want a mixer that will generate audio directly to the audio device of our choice.
 extern SDL_DECLSPEC MIX_Mixer * SDLCALL MIX_CreateMixer(const SDL_AudioSpec *spec);  // we want a mixer that will generate audio through an SDL_AudioStream we can consume from on-demand.
 extern SDL_DECLSPEC void SDLCALL MIX_DestroyMixer(MIX_Mixer *mixer);
+extern SDL_DECLSPEC SDL_PropertiesID SDLCALL MIX_GetMixerProperties(MIX_Mixer *mixer);
 
 extern SDL_DECLSPEC bool SDLCALL MIX_GetMixerFormat(MIX_Mixer *mixer, SDL_AudioSpec *spec);   // what the device is actually expecting/what the mixer is generating.
 
@@ -129,6 +130,7 @@ extern SDL_DECLSPEC void SDLCALL MIX_DestroyAudio(MIX_Audio *audio);  // referen
 
 extern SDL_DECLSPEC MIX_Track * SDLCALL MIX_CreateTrack(MIX_Mixer *mixer);
 extern SDL_DECLSPEC void SDLCALL MIX_DestroyTrack(MIX_Track *track);  // will halt playback, if playing. Won't call Stopped callback, though. We assume you know.
+extern SDL_DECLSPEC SDL_PropertiesID SDLCALL MIX_GetTrackProperties(MIX_Track *track);
 
 extern SDL_DECLSPEC MIX_Mixer * SDLCALL MIX_GetTrackMixer(MIX_Track *track);
 
@@ -233,6 +235,7 @@ extern SDL_DECLSPEC bool SDLCALL MIX_GetTrack3DPosition(MIX_Track *track, MIX_Po
 // groups...
 extern SDL_DECLSPEC MIX_Group * SDLCALL MIX_CreateGroup(MIX_Mixer *mixer);
 extern SDL_DECLSPEC void SDLCALL MIX_DestroyGroup(MIX_Group *group);
+extern SDL_DECLSPEC SDL_PropertiesID SDLCALL MIX_GetGroupProperties(MIX_Group *group);
 extern SDL_DECLSPEC MIX_Mixer * SDLCALL MIX_GetGroupMixer(MIX_Group *group);
 extern SDL_DECLSPEC bool MIX_SetTrackGroup(MIX_Track *track, MIX_Group *group);  // both track and group must be on same MIX_Mixer!
 

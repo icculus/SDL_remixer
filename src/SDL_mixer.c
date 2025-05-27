@@ -659,6 +659,22 @@ void MIX_Quit(void)
     mixer_initialized = 0;
 }
 
+int MIX_GetNumAudioDecoders(void)
+{
+    return CheckInitialized() ? num_available_decoders : -1;
+}
+
+const char *MIX_GetAudioDecoder(int index)
+{
+    if (!CheckInitialized()) {
+        return NULL;
+    } else if ((index < 0) || (index >= num_available_decoders)) {
+        SDL_InvalidParamError("index");
+        return NULL;
+    }
+    return available_decoders[index]->name;
+}
+
 static MIX_Mixer *CreateMixer(SDL_AudioStream *stream)
 {
     if (!stream) {
@@ -782,24 +798,21 @@ void MIX_DestroyMixer(MIX_Mixer *mixer)
 
     SDL_DestroyAudioStream(mixer->output_stream);
     SDL_DestroyProperties(mixer->track_tags);
+    SDL_DestroyProperties(mixer->props);
     SDL_free(mixer->mix_buffer);
     SDL_free(mixer);
 }
 
-int MIX_GetNumAudioDecoders(void)
+SDL_PropertiesID MIX_GetMixerProperties(MIX_Mixer *mixer)
 {
-    return CheckInitialized() ? num_available_decoders : -1;
-}
-
-const char *MIX_GetAudioDecoder(int index)
-{
-    if (!CheckInitialized()) {
-        return NULL;
-    } else if ((index < 0) || (index >= num_available_decoders)) {
-        SDL_InvalidParamError("index");
-        return NULL;
+    if (!CheckMixerParam(mixer)) {
+        return 0;
     }
-    return available_decoders[index]->name;
+
+    if (mixer->props == 0) {
+        mixer->props = SDL_CreateProperties();
+    }
+    return mixer->props;
 }
 
 bool MIX_GetMixerFormat(MIX_Mixer *mixer, SDL_AudioSpec *spec)
@@ -1303,9 +1316,22 @@ void MIX_DestroyTrack(MIX_Track *track)
 
     UnrefAudio(track->input_audio);
     SDL_EnumerateProperties(track->tags, UntagWholeTrack, track);
+    SDL_DestroyProperties(track->props);
     SDL_DestroyProperties(track->tags);
     SDL_free(track->input_buffer);
     SDL_aligned_free(track);
+}
+
+SDL_PropertiesID MIX_GetTrackProperties(MIX_Track *track)
+{
+    if (!CheckTrackParam(track)) {
+        return 0;
+    }
+
+    if (track->props == 0) {
+        track->props = SDL_CreateProperties();
+    }
+    return track->props;
 }
 
 bool MIX_SetTrackAudio(MIX_Track *track, MIX_Audio *audio)
@@ -2294,7 +2320,20 @@ void MIX_DestroyGroup(MIX_Group *group)
     }
     UnlockMixer(mixer);
 
+    SDL_DestroyProperties(group->props);
     SDL_free(group);
+}
+
+SDL_PropertiesID MIX_GetGroupProperties(MIX_Group *group)
+{
+    if (!CheckGroupParam(group)) {
+        return 0;
+    }
+
+    if (group->props == 0) {
+        group->props = SDL_CreateProperties();
+    }
+    return group->props;
 }
 
 MIX_Mixer *MIX_GetGroupMixer(MIX_Group *group)
