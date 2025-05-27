@@ -1086,7 +1086,13 @@ MIX_Audio *MIX_LoadRawAudio_IO(MIX_Mixer *mixer, SDL_IOStream *io, const SDL_Aud
     return audio;
 }
 
-MIX_Audio *MIX_LoadRawAudio(MIX_Mixer *mixer, const void *data, size_t datalen, const SDL_AudioSpec *spec, bool free_when_done)
+
+MIX_Audio *MIX_LoadRawAudio(MIX_Mixer *mixer, const void *data, size_t datalen, const SDL_AudioSpec *spec)
+{
+    return MIX_LoadRawAudio_IO(mixer, SDL_IOFromConstMem(data, datalen), spec, true);
+}
+
+MIX_Audio *MIX_LoadRawAudioNoCopy(MIX_Mixer *mixer, const void *data, size_t datalen, const SDL_AudioSpec *spec, bool free_when_done)
 {
     if (!CheckInitialized()) {
         return NULL;

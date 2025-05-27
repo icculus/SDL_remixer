@@ -110,8 +110,11 @@ extern SDL_DECLSPEC MIX_Audio * SDLCALL MIX_LoadAudioWithProperties(SDL_Properti
 // Load raw PCM data to a MIX_Audio from an IOStream.
 extern SDL_DECLSPEC MIX_Audio * SDLCALL MIX_LoadRawAudio_IO(MIX_Mixer *mixer, SDL_IOStream *io, const SDL_AudioSpec *spec, bool closeio);
 
-// Load raw PCM data to a MIX_Audio. If free_when_done==true, will be SDL_free()'d when the MIX_Audio is destroyed. Otherwise, it's never free'd by SDL_mixer.
-extern SDL_DECLSPEC MIX_Audio * SDLCALL MIX_LoadRawAudio(MIX_Mixer *mixer, const void *data, size_t datalen, const SDL_AudioSpec *spec, bool copy);
+// Load raw PCM data to a MIX_Audio. SDL_mixer will make a copy.
+extern SDL_DECLSPEC MIX_Audio * SDLCALL MIX_LoadRawAudio(MIX_Mixer *mixer, const void *data, size_t datalen, const SDL_AudioSpec *spec);
+
+// Load raw PCM data to a MIX_Audio. SDL_mixer will NOT make a copy, it must live until the MIX_Audio is destroyed. if free_when_done, SDL_mixer will SDL_free(data) when the MIX_Audio is destroyed.
+MIX_Audio *MIX_LoadRawAudioNoCopy(MIX_Mixer *mixer, const void *data, size_t datalen, const SDL_AudioSpec *spec, bool free_when_done);
 
 // just in case you need some audio to play, this will generate a sine wave forever when assigned to a playing Track.
 extern SDL_DECLSPEC MIX_Audio * SDLCALL MIX_CreateSineWaveAudio(MIX_Mixer *mixer, int hz, float amplitude);

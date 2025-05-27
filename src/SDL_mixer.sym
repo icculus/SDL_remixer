@@ -14,6 +14,7 @@ SDL3_mixer_0.0.0 {
     MIX_LoadAudioWithProperties;
     MIX_LoadRawAudio_IO;
     MIX_LoadRawAudio;
+    MIX_LoadRawAudioNoCopy;
     MIX_CreateSineWaveAudio;
     MIX_GetAudioProperties;
     MIX_DestroyAudio;
