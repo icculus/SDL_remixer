@@ -71,6 +71,7 @@ SDL3_mixer_0.0.0 {
     MIX_GetTrackRemaining;
     MIX_SetTrack3DPosition;
     MIX_GetTrack3DPosition;
+    MIX_GetAudioFormat;
     MIX_GetMixerProperties;
     MIX_GetTrackProperties;
     MIX_GetGroupProperties;

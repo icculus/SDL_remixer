@@ -119,6 +119,7 @@ extern SDL_DECLSPEC MIX_Audio * SDLCALL MIX_CreateSineWaveAudio(MIX_Mixer *mixer
 
 extern SDL_DECLSPEC SDL_PropertiesID SDLCALL MIX_GetAudioProperties(MIX_Audio *audio);  // we can store audio format-specific metadata in here (artist/album/etc info...)
 extern SDL_DECLSPEC Sint64 MIX_GetAudioDuration(MIX_Audio *audio);
+extern SDL_DECLSPEC bool MIX_GetAudioFormat(MIX_Audio *audio, SDL_AudioSpec *spec);
 
 extern SDL_DECLSPEC void SDLCALL MIX_DestroyAudio(MIX_Audio *audio);  // reference-counted; if this is playing, it will be _actually_ destroyed when no longer in use.
 

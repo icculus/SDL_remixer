@@ -1173,6 +1173,17 @@ SDL_PropertiesID MIX_GetAudioProperties(MIX_Audio *audio)
     return audio->props;
 }
 
+bool MIX_GetAudioFormat(MIX_Audio *audio, SDL_AudioSpec *spec)
+{
+    if (!CheckAudioParam(audio)) {
+        return false;
+    } else if (!spec) {
+        return SDL_InvalidParamError("spec");
+    }
+    SDL_copyp(spec, &audio->spec);
+    return true;
+}
+
 Sint64 MIX_GetAudioDuration(MIX_Audio *audio)
 {
     return CheckAudioParam(audio) ? audio->duration_frames : -1;

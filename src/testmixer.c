@@ -142,6 +142,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         return SDL_APP_FAILURE;
     }
 
+    SDL_AudioSpec audiospec;
+    MIX_GetAudioFormat(audio, &audiospec);
+    SDL_Log("%s: %s, %d channel%s, %d freq", audiofname, SDL_GetAudioFormatName(audiospec.format), audiospec.channels, (audiospec.channels == 1) ? "" : "s", audiospec.freq);
+
     SDL_Log("%s metadata:", audiofname);
     SDL_PropertiesID props = MIX_GetAudioProperties(audio);
     bool had_metadata = false;
