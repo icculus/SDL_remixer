@@ -23,6 +23,8 @@
 
 #include "SDL_mixer_internal.h"
 
+// !!! FIXME: change track interface to provide the stream when seeking, then we could use SDL_AudioStreamPutDataNoCopy to push the whole buffer upfront for free, and clear/push a subset when seeking.
+
 typedef struct RAW_AudioUserData
 {
     const Uint8 *data;

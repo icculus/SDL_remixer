@@ -21,6 +21,13 @@
 
 // (this decoder is always enabled, since an external API uses it.)
 
+// !!! FIXME:
+// change track interface to provide the stream when seeking, then we could:
+//   - Generate one whole iteration of the waveform upfront
+//   - Push the same buffer twice with SDL_AudioStreamPutDataNoCopy
+//   - decode just needs to see if one of the buffers is complete and push it again.
+//   - clear/push a subset when seeking.
+
 #include "SDL_mixer_internal.h"
 
 typedef struct SINEWAVE_AudioUserData
