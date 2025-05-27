@@ -14,6 +14,20 @@ static MIX_Track *track = NULL;
 static SDL_IOStream *io = NULL;
 #endif
 
+static SDL_IOStream *ioraw = NULL;
+static SDL_IOStream *iocooked = NULL;
+static SDL_IOStream *iopostmix = NULL;
+
+static void SDLCALL WritePCMCallback(void *userdata, MIX_Track *track, const SDL_AudioSpec *spec, float *pcm, int samples)
+{
+    SDL_WriteIO((SDL_IOStream *) userdata, pcm, samples * sizeof (float));
+}
+
+static void SDLCALL WritePostmixPCMCallback(void *userdata, MIX_Mixer *mixer, const SDL_AudioSpec *spec, float *pcm, int samples)
+{
+    WritePCMCallback(userdata, NULL, spec, pcm, samples);
+}
+
 static void LogMetadata(SDL_PropertiesID props, const char *name)
 {
     switch (SDL_GetPropertyType(props, name)) {
@@ -87,7 +101,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     } else if (!MIX_Init()) {
-        SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
+        SDL_Log("Couldn't initialize SDL_mixer: %s", SDL_GetError());
         return SDL_APP_FAILURE;
 //    } else if (!SDL_CreateWindowAndRenderer("testmixer", 640, 480, 0, &window, &renderer)) {
 //        SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
@@ -152,6 +166,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     SDL_Log("%s", "");
 
     track = MIX_CreateTrack(mixer);
+
+    //ioraw = SDL_IOFromFile("trackraw.raw", "wb"); if (ioraw) { MIX_SetTrackRawCallback(track, WritePCMCallback, ioraw); }
+    //iocooked = SDL_IOFromFile("trackcooked.raw", "wb"); if (iocooked) { MIX_SetTrackCookedCallback(track, WritePCMCallback, iocooked); }
+    //iopostmix = SDL_IOFromFile("postmix.raw", "wb"); if (iopostmix) { MIX_SetPostMixCallback(mixer, WritePostmixPCMCallback, iopostmix); }
+
     //const int chmap[] = { 1, 0 }; MIX_SetTrackOutputChannelMap(track, chmap, SDL_arraysize(chmap));
     MIX_SetTrackAudio(track, audio);
 
@@ -211,6 +230,10 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
     // SDL will clean up the window/renderer for us.
     // SDL_mixer will clean up the tracks and audio.
     MIX_Quit();
+
+    if (ioraw) { SDL_CloseIO(ioraw); }
+    if (iocooked) { SDL_CloseIO(iocooked); }
+    if (iopostmix) { SDL_CloseIO(iopostmix); }
 
     #if USE_MIX_GENERATE
     SDL_CloseIO(io);
