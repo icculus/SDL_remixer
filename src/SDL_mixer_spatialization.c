@@ -237,12 +237,12 @@ static void calculate_distance_attenuation_and_angle_scalar(const float *positio
     V[2] = position[2] - (a * listener_up[2]);
 
     // Calculate angle
-    const float mags = magnitude(at) * magnitude(V);
+    const float mags = magnitude(listener_at) * magnitude(V);
     float radians;
     if (mags == 0.0f) {
         radians = 0.0f;
     } else {
-        const float cosangle = dotproduct(at, V) / mags;
+        const float cosangle = dotproduct(listener_at, V) / mags;
         radians = SDL_acosf(SDL_clamp(cosangle, -1.0f, 1.0f));
     }
 
