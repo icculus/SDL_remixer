@@ -355,6 +355,9 @@ static void SDLCALL TrackGetCallback(void *userdata, SDL_AudioStream *stream, in
         // remember that the callback in TrackStopped() might restart this track,
         //  so we'll loop to see if we can fill in more audio without a gap even in that case.
         if (end_of_audio) {
+            if (track->input_audio) {
+                SDL_ClearAudioStream(track->input_stream);   // make sure that any extra buffered input is removed.
+            }
             bool track_stopped = false;
             if (track->loops_remaining == 0) {
                 if (track->silence_frames < 0) {
@@ -1260,6 +1263,7 @@ bool MIX_SetTrackAudio(MIX_Track *track, MIX_Audio *audio)
             SDL_copyp(&track->output_spec, &spec);
             track->input_audio = audio;
             track->input_stream = track->internal_stream;
+            SDL_ClearAudioStream(track->input_stream);   // make sure that any extra buffered input from before is removed.
             track->position = 0;
         }
     }
@@ -1439,6 +1443,7 @@ bool MIX_SetTrackPlaybackPosition(MIX_Track *track, Uint64 frames)
     } else {
         retval = track->input_audio->decoder->seek(track->decoder_userdata, frames);
         if (retval) {
+            SDL_ClearAudioStream(track->input_stream);   // make sure that any extra buffered input from before the seek is removed.
             track->position = frames;
         }
     }
@@ -1698,6 +1703,9 @@ static void StopTrack(MIX_Track *track, Sint64 fadeOut)
     LockTrack(track);
     if (track->state != MIX_STATE_STOPPED) {
         if (fadeOut <= 0) {  // stop immediately.
+            if (track->internal_stream) {
+                SDL_ClearAudioStream(track->internal_stream);  // make sure we don't leave old data hanging around.
+            }
             TrackStopped(track);
         } else {
             track->total_fade_frames = fadeOut;
