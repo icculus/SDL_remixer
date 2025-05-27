@@ -1061,8 +1061,15 @@ MIX_Audio *MIX_LoadAudio(MIX_Mixer *mixer, const char *path, bool predecode)
 
 MIX_Audio *MIX_LoadRawAudio_IO(MIX_Mixer *mixer, SDL_IOStream *io, const SDL_AudioSpec *spec, bool closeio)
 {
-    if (!io) {
+    if (!CheckMixerParam(mixer)) {
+        if (io && closeio) { SDL_CloseIO(io); }
+        return NULL;
+    } else if (!io) {
         SDL_InvalidParamError("io");
+        return NULL;
+    } else if (!spec) {
+        if (io && closeio) { SDL_CloseIO(io); }
+        SDL_InvalidParamError("spec");
         return NULL;
     }
 
