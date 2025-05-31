@@ -42,7 +42,7 @@
 #define MIX_LOADER_DYNAMIC MPG123_DYNAMIC
 #endif
 
-#define MIX_LOADER_FUNCTIONS \
+#define MIX_LOADER_FUNCTIONS_mpg123base \
     MIX_LOADER_FUNCTION(true,int,mpg123_close,(mpg123_handle *mh)) \
     MIX_LOADER_FUNCTION(true,void,mpg123_delete,(mpg123_handle *mh)) \
     MIX_LOADER_FUNCTION(true,void,mpg123_exit,(void)) \
@@ -62,7 +62,15 @@
     MIX_LOADER_FUNCTION(true,off_t,mpg123_tell,(mpg123_handle *mh)) \
     MIX_LOADER_FUNCTION(true,off_t,mpg123_length,(mpg123_handle *mh)) \
     MIX_LOADER_FUNCTION(true,const char*,mpg123_strerror,(mpg123_handle *mh)) \
-    MIX_LOADER_FUNCTION(false,int,mpg123_param2,(mpg123_handle *mh, int type, long value, double fvalue)) \
+
+#if (MPG123_API_VERSION < 48) && !defined(MPG123_DYNAMIC)
+    #define mpg123_param2 mpg123_param
+    #define MIX_LOADER_FUNCTIONS MIX_LOADER_FUNCTIONS_mpg123base
+#else
+    #define MIX_LOADER_FUNCTIONS \
+        MIX_LOADER_FUNCTIONS_mpg123base \
+        MIX_LOADER_FUNCTION(false,int,mpg123_param2,(mpg123_handle *mh, int type, long value, double fvalue))
+#endif
 
 #define MIX_LOADER_MODULE mpg123
 #include "SDL_mixer_loader.h"
@@ -88,10 +96,12 @@ static bool SDLCALL MPG123_init(void)
         return false;
     }
 
+    #if (MPG123_API_VERSION >= 48) || defined(MPG123_DYNAMIC)
     if (!mpg123.mpg123_param2) {
         // hope that the libmpg123 build we just linked to has sizeof(int) == sizeof(enum)
         mpg123.mpg123_param2 = (int (*)(mpg123_handle*,int,long,double)) mpg123.mpg123_param;
     }
+    #endif
     mpg123.mpg123_init();
 
     return true;
