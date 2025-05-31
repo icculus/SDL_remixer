@@ -487,7 +487,7 @@ if(SDLMIXER_VORBIS_TREMOR)
         endif()
     endif()
     if(SDLMIXER_VORBIS_TREMOR_ENABLED)
-        target_compile_definitions(${sdl3_mixer_target_name} PRIVATE DECODER_OGGVORBIS_VORBISFILE OGG_USE_TREMOR)
+        target_compile_definitions(${sdl3_mixer_target_name} PRIVATE DECODER_OGGVORBIS_VORBISFILE VORBIS_USE_TREMOR)
         if(SDLMIXER_VORBIS_TREMOR_SHARED)
             target_include_directories(${sdl3_mixer_target_name} PRIVATE
                 $<TARGET_PROPERTY:tremor::tremor,INCLUDE_DIRECTORIES>
