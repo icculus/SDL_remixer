@@ -360,7 +360,7 @@ static void SDL_TARGETING("neon") calculate_distance_attenuation_and_angle_neon(
         radians = -radians;
     }
 
-    *_gain = calculate_distance_attenuation(magnitude_neon(position_sse));
+    *_gain = calculate_distance_attenuation(magnitude_neon(position_neon));
     *_radians = radians;
 }
 #endif
