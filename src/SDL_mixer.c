@@ -183,7 +183,7 @@ static bool SDLCALL AudioDeviceChangeEventWatcher(void *userdata, SDL_Event *eve
     MIX_Mixer *mixer = (MIX_Mixer *) userdata;
     if (event->type != SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED) {
         return true;  // don't care about this event.
-    } else if (mixer->device_id == event->adevice.which) {
+    } else if (mixer->device_id != event->adevice.which) {
         return true;  // don't care about this device.
     } else if (mixer->device_id == 0) {
         return true;  // don't care about this mixer.
@@ -193,7 +193,7 @@ static bool SDLCALL AudioDeviceChangeEventWatcher(void *userdata, SDL_Event *eve
 
     LockMixer(mixer);
 
-    // just all our output streams to the new format.
+    // adjust all our output streams to the new format.
     if (SDL_GetAudioStreamFormat(mixer->output_stream, NULL, &mixer->spec)) {
         mixer->spec.format = SDL_AUDIO_F32;
         if (SDL_SetAudioStreamFormat(mixer->output_stream, &mixer->spec, NULL)) {
