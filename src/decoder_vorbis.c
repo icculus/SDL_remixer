@@ -69,7 +69,7 @@
 #define VORBIS_AUDIO_FORMAT SDL_AUDIO_F32
 #endif
 
-typedef struct VORBIS_AudioUserData
+typedef struct VORBIS_AudioData
 {
     const Uint8 *data;
     size_t datalen;
@@ -77,17 +77,17 @@ typedef struct VORBIS_AudioUserData
     Sint64 loop_start;
     Sint64 loop_end;
     Sint64 loop_len;
-} VORBIS_AudioUserData;
+} VORBIS_AudioData;
 
-typedef struct VORBIS_UserData
+typedef struct VORBIS_TrackData
 {
-    const VORBIS_AudioUserData *payload;
-    SDL_IOStream *io;  // a const-mem IOStream for accessing the payload's data.
+    const VORBIS_AudioData *adata;
+    SDL_IOStream *io;  // a const-mem IOStream for accessing the adata's data.
     OggVorbis_File vf;
     int current_channels;
     int current_freq;
     int current_bitstream;
-} VORBIS_UserData;
+} VORBIS_TrackData;
 
 
 static bool SDLCALL VORBIS_init(void)
@@ -170,19 +170,19 @@ static bool SDLCALL VORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
         return false;
     }
 
-    VORBIS_AudioUserData *payload = (VORBIS_AudioUserData *) SDL_calloc(1, sizeof (*payload));
-    if (!payload) {
+    VORBIS_AudioData *adata = (VORBIS_AudioData *) SDL_calloc(1, sizeof (*adata));
+    if (!adata) {
         SDL_free(data);
         return false;
     }
 
-    payload->data = data;
-    payload->datalen = datalen;
+    adata->data = data;
+    adata->datalen = datalen;
 
     io = SDL_IOFromConstMem(data, datalen);  // switch over to a memory IOStream.
     if (!io) {  // uhoh.
         SDL_free(data);
-        SDL_free(payload);
+        SDL_free(adata);
         return false;
     }
 
@@ -191,7 +191,7 @@ static bool SDLCALL VORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
     if (rc < 0) {
         SDL_CloseIO(io);
         SDL_free(data);
-        SDL_free(payload);
+        SDL_free(adata);
         return SetOggVorbisError("ov_open_callbacks", rc);
     }
 
@@ -200,7 +200,7 @@ static bool SDLCALL VORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
         vorbis.ov_clear(&vf);
         SDL_CloseIO(io);
         SDL_free(data);
-        SDL_free(payload);
+        SDL_free(adata);
         return SDL_SetError("Couldn't get Ogg Vorbis info; corrupt data?");
     }
 
@@ -210,87 +210,87 @@ static bool SDLCALL VORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
 
     vorbis_comment *vc = vorbis.ov_comment(&vf, -1);
     if (vc != NULL) {
-        MIX_ParseOggComments(props, spec->freq, vc->vendor, (const char * const *) vc->user_comments, vc->comments, &payload->loop_start, &payload->loop_end, &payload->loop_len);
+        MIX_ParseOggComments(props, spec->freq, vc->vendor, (const char * const *) vc->user_comments, vc->comments, &adata->loop_start, &adata->loop_end, &adata->loop_len);
     }
 
     vorbis.ov_raw_seek(&vf, 0);  // !!! FIXME: it's not clear if this seek is necessary, but https://stackoverflow.com/a/72482773 suggests it might be, at least on older libvorbisfile releases...
     const Sint64 full_length = (Sint64) vorbis.ov_pcm_total(&vf, -1);
-    payload->loop = ((payload->loop_end > 0) && (payload->loop_end <= full_length) && (payload->loop_start < payload->loop_end));
+    adata->loop = ((adata->loop_end > 0) && (adata->loop_end <= full_length) && (adata->loop_start < adata->loop_end));
     vorbis.ov_clear(&vf);  // done with this instance. Tracks will maintain their own OggVorbis_File object.
     SDL_CloseIO(io);  // close our memory i/o.
 
-    *duration_frames = payload->loop ? MIX_DURATION_INFINITE : full_length;  // if looping, stream is infinite.
-    *audio_userdata = payload;
+    *duration_frames = adata->loop ? MIX_DURATION_INFINITE : full_length;  // if looping, stream is infinite.
+    *audio_userdata = adata;
 
     return true;
 }
 
-bool SDLCALL VORBIS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+bool SDLCALL VORBIS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
-    VORBIS_UserData *d = (VORBIS_UserData *) SDL_calloc(1, sizeof (*d));
-    if (!d) {
+    VORBIS_TrackData *tdata = (VORBIS_TrackData *) SDL_calloc(1, sizeof (*tdata));
+    if (!tdata) {
         return false;
     }
 
-    const VORBIS_AudioUserData *payload = (const VORBIS_AudioUserData *) audio_userdata;
+    const VORBIS_AudioData *adata = (const VORBIS_AudioData *) audio_userdata;
 
-    d->io = SDL_IOFromConstMem(payload->data, payload->datalen);
-    if (!d->io) {  // uhoh.
-        SDL_free(d);
+    tdata->io = SDL_IOFromConstMem(adata->data, adata->datalen);
+    if (!tdata->io) {  // uhoh.
+        SDL_free(tdata);
         return false;
     }
 
     // now open the memory buffer for serious processing.
-    int rc = vorbis.ov_open_callbacks(d->io, &d->vf, NULL, 0, VORBIS_IoCallbacks);
+    int rc = vorbis.ov_open_callbacks(tdata->io, &tdata->vf, NULL, 0, VORBIS_IoCallbacks);
     if (rc < 0) {
-        SDL_CloseIO(d->io);
-        SDL_free(d);
+        SDL_CloseIO(tdata->io);
+        SDL_free(tdata);
         return SetOggVorbisError("ov_open_callbacks", rc);
     }
 
-    d->current_channels = spec->channels;
-    d->current_freq = spec->freq;
-    d->current_bitstream = -1;
-    d->payload = payload;
+    tdata->current_channels = spec->channels;
+    tdata->current_freq = spec->freq;
+    tdata->current_bitstream = -1;
+    tdata->adata = adata;
 
-    *userdata = d;
+    *track_userdata = tdata;
 
     return true;
 }
 
 bool SDLCALL VORBIS_decode(void *userdata, SDL_AudioStream *stream)
 {
-    VORBIS_UserData *d = (VORBIS_UserData *) userdata;
-    //const VORBIS_AudioUserData *payload = d->payload;
-    int bitstream = d->current_bitstream;
+    VORBIS_TrackData *tdata = (VORBIS_TrackData *) userdata;
+    //const VORBIS_AudioData *adata = tdata->adata;
+    int bitstream = tdata->current_bitstream;
 
     // !!! FIXME: handle looping.
 
 #ifdef VORBIS_USE_TREMOR
     Uint8 samples[256];
-    const int amount = (int)vorbis.ov_read(&d->vf, samples, sizeof (samples), &bitstream);
+    const int amount = (int)vorbis.ov_read(&tdata->vf, samples, sizeof (samples), &bitstream);
     if (amount < 0) {
         return SetOggVorbisError("ov_read", amount);
     }
 #else
     float **pcm_channels = NULL;
-    const int amount = (int)vorbis.ov_read_float(&d->vf, &pcm_channels, 256, &bitstream);
+    const int amount = (int)vorbis.ov_read_float(&tdata->vf, &pcm_channels, 256, &bitstream);
     if (amount < 0) {
         return SetOggVorbisError("ov_read_float", amount);
     }
 #endif
 
-    if (bitstream != d->current_bitstream) {
-        const vorbis_info *vi = vorbis.ov_info(&d->vf, -1);
+    if (bitstream != tdata->current_bitstream) {
+        const vorbis_info *vi = vorbis.ov_info(&tdata->vf, -1);
         if (vi) {  // this _shouldn't_ be NULL, but if it is, we're just going on without it and hoping the stream format didn't change.
-            if ((d->current_channels != vi->channels) || (d->current_freq != vi->rate)) {
+            if ((tdata->current_channels != vi->channels) || (tdata->current_freq != vi->rate)) {
                 const SDL_AudioSpec spec = { VORBIS_AUDIO_FORMAT, vi->channels, vi->rate };
                 SDL_SetAudioStreamFormat(stream, &spec, NULL);
-                d->current_channels = vi->channels;
-                d->current_freq = vi->rate;
+                tdata->current_channels = vi->channels;
+                tdata->current_freq = vi->rate;
             }
         }
-        d->current_bitstream = bitstream;
+        tdata->current_bitstream = bitstream;
     }
 
     if (amount == 0) {
@@ -308,25 +308,25 @@ bool SDLCALL VORBIS_decode(void *userdata, SDL_AudioStream *stream)
 
 bool SDLCALL VORBIS_seek(void *userdata, Uint64 frame)
 {
-    VORBIS_UserData *d = (VORBIS_UserData *) userdata;
+    VORBIS_TrackData *tdata = (VORBIS_TrackData *) userdata;
     // !!! FIXME: I assume ov_raw_seek is faster if we're seeking to start, but I could be wrong.
-    const int rc = (frame == 0) ? vorbis.ov_raw_seek(&d->vf, 0) : vorbis.ov_pcm_seek(&d->vf, (ogg_int64_t) frame);
+    const int rc = (frame == 0) ? vorbis.ov_raw_seek(&tdata->vf, 0) : vorbis.ov_pcm_seek(&tdata->vf, (ogg_int64_t) frame);
     return (rc == 0) ? true : SetOggVorbisError("ov_pcm_seek", rc);
 }
 
 void SDLCALL VORBIS_quit_track(void *userdata)
 {
-    VORBIS_UserData *d = (VORBIS_UserData *) userdata;
-    vorbis.ov_clear(&d->vf);
-    SDL_CloseIO(d->io);
-    SDL_free(d);
+    VORBIS_TrackData *tdata = (VORBIS_TrackData *) userdata;
+    vorbis.ov_clear(&tdata->vf);
+    SDL_CloseIO(tdata->io);
+    SDL_free(tdata);
 }
 
 void SDLCALL VORBIS_quit_audio(void *audio_userdata)
 {
-    VORBIS_AudioUserData *d = (VORBIS_AudioUserData *) audio_userdata;
-    SDL_free((void *) d->data);
-    SDL_free(d);
+    VORBIS_AudioData *tdata = (VORBIS_AudioData *) audio_userdata;
+    SDL_free((void *) tdata->data);
+    SDL_free(tdata);
 }
 
 MIX_Decoder MIX_Decoder_VORBIS = {

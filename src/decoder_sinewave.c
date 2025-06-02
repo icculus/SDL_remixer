@@ -30,18 +30,18 @@
 
 #include "SDL_mixer_internal.h"
 
-typedef struct SINEWAVE_AudioUserData
+typedef struct SINEWAVE_AudioData
 {
     int hz;
     float amplitude;
     int sample_rate;
-} SINEWAVE_AudioUserData;
+} SINEWAVE_AudioData;
 
-typedef struct SINEWAVE_UserData
+typedef struct SINEWAVE_TrackData
 {
-    const SINEWAVE_AudioUserData *payload;
+    const SINEWAVE_AudioData *adata;
     int current_sine_sample;
-} SINEWAVE_UserData;
+} SINEWAVE_TrackData;
 
 static bool SDLCALL SINEWAVE_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
@@ -61,42 +61,42 @@ static bool SDLCALL SINEWAVE_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, S
     spec->channels = 1;
     // we use the existing spec->freq to match the device sample rate, avoiding unnecessary resampling.
 
-    SINEWAVE_AudioUserData *payload = (SINEWAVE_AudioUserData *) SDL_malloc(sizeof (*payload));
-    if (!payload) {
+    SINEWAVE_AudioData *adata = (SINEWAVE_AudioData *) SDL_malloc(sizeof (*adata));
+    if (!adata) {
         return false;
     }
 
-    payload->hz = (int) si64hz;
-    payload->amplitude = famp;
-    payload->sample_rate = spec->freq;
+    adata->hz = (int) si64hz;
+    adata->amplitude = famp;
+    adata->sample_rate = spec->freq;
 
     *duration_frames = MIX_DURATION_INFINITE;
-    *audio_userdata = payload;
+    *audio_userdata = adata;
     return true;
 }
 
-static bool SDLCALL SINEWAVE_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+static bool SDLCALL SINEWAVE_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
-    SINEWAVE_UserData *d = (SINEWAVE_UserData *) SDL_calloc(1, sizeof (*d));
-    if (!d) {
+    SINEWAVE_TrackData *tdata = (SINEWAVE_TrackData *) SDL_calloc(1, sizeof (*tdata));
+    if (!tdata) {
         return false;
     }
 
-    d->payload = (const SINEWAVE_AudioUserData *) audio_userdata;
-    *userdata = d;
+    tdata->adata = (const SINEWAVE_AudioData *) audio_userdata;
+    *track_userdata = tdata;
 
     return true;
 }
 
 static bool SDLCALL SINEWAVE_decode(void *userdata, SDL_AudioStream *stream)
 {
-    SINEWAVE_UserData *d = (SINEWAVE_UserData *) userdata;
-    const SINEWAVE_AudioUserData *payload = d->payload;
-    const int sample_rate = payload->sample_rate;
+    SINEWAVE_TrackData *tdata = (SINEWAVE_TrackData *) userdata;
+    const SINEWAVE_AudioData *adata = tdata->adata;
+    const int sample_rate = adata->sample_rate;
     const float fsample_rate = (float) sample_rate;
-    const int hz = payload->hz;
-    const float amplitude = payload->amplitude;
-    int current_sine_sample = d->current_sine_sample;
+    const int hz = adata->hz;
+    const float amplitude = adata->amplitude;
+    int current_sine_sample = tdata->current_sine_sample;
     float samples[256];
 
     for (int i = 0; i < SDL_arraysize(samples); i++) {
@@ -106,7 +106,7 @@ static bool SDLCALL SINEWAVE_decode(void *userdata, SDL_AudioStream *stream)
     }
 
     // wrapping around to avoid floating-point errors
-    d->current_sine_sample = current_sine_sample % sample_rate;
+    tdata->current_sine_sample = current_sine_sample % sample_rate;
 
     SDL_PutAudioStreamData(stream, samples, sizeof (samples));
 
@@ -115,9 +115,9 @@ static bool SDLCALL SINEWAVE_decode(void *userdata, SDL_AudioStream *stream)
 
 static bool SDLCALL SINEWAVE_seek(void *userdata, Uint64 frame)
 {
-    SINEWAVE_UserData *d = (SINEWAVE_UserData *) userdata;
-    const SINEWAVE_AudioUserData *payload = d->payload;
-    d->current_sine_sample = frame % payload->sample_rate;
+    SINEWAVE_TrackData *tdata = (SINEWAVE_TrackData *) userdata;
+    const SINEWAVE_AudioData *adata = tdata->adata;
+    tdata->current_sine_sample = frame % adata->sample_rate;
     return true;
 }
 

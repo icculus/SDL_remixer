@@ -47,7 +47,7 @@
 #define MIX_LOADER_MODULE flac
 #include "SDL_mixer_loader.h"
 
-typedef struct FLAC_AudioUserData
+typedef struct FLAC_AudioData
 {
     const Uint8 *data;
     size_t datalen;
@@ -57,11 +57,11 @@ typedef struct FLAC_AudioUserData
     Sint64 loop_end;
     Sint64 loop_len;
     SDL_PropertiesID props;
-} FLAC_AudioUserData;
+} FLAC_AudioData;
 
-typedef struct FLAC_UserData
+typedef struct FLAC_TrackData
 {
-    const FLAC_AudioUserData *payload;
+    const FLAC_AudioData *adata;
     SDL_IOStream *io;
     FLAC__StreamDecoder *decoder;
     SDL_AudioStream *stream;
@@ -69,16 +69,16 @@ typedef struct FLAC_UserData
     int bits_per_sample;
     Uint8 *cvtbuf;
     size_t cvtbuflen;
-} FLAC_UserData;
+} FLAC_TrackData;
 
 
 
 static FLAC__StreamDecoderReadStatus FLAC_IoRead(const FLAC__StreamDecoder *decoder, FLAC__byte buffer[], size_t *bytes, void *userdata)
 {
     if (*bytes > 0) {
-        FLAC_UserData *d = (FLAC_UserData *) userdata;
-        *bytes = SDL_ReadIO(d->io, buffer, *bytes);
-        const SDL_IOStatus status = SDL_GetIOStatus(d->io);
+        FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
+        *bytes = SDL_ReadIO(tdata->io, buffer, *bytes);
+        const SDL_IOStatus status = SDL_GetIOStatus(tdata->io);
         if (status == SDL_IO_STATUS_READY || status == SDL_IO_STATUS_NOT_READY) {
             return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
         } else if (status == SDL_IO_STATUS_EOF) {
@@ -90,8 +90,8 @@ static FLAC__StreamDecoderReadStatus FLAC_IoRead(const FLAC__StreamDecoder *deco
 
 static FLAC__StreamDecoderSeekStatus FLAC_IoSeek(const FLAC__StreamDecoder *decoder, FLAC__uint64 absolute_byte_offset, void *userdata)
 {
-    FLAC_UserData *d = (FLAC_UserData *) userdata;
-    if (SDL_SeekIO(d->io, (Sint64)absolute_byte_offset, SDL_IO_SEEK_SET) < 0) {
+    FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
+    if (SDL_SeekIO(tdata->io, (Sint64)absolute_byte_offset, SDL_IO_SEEK_SET) < 0) {
         return FLAC__STREAM_DECODER_SEEK_STATUS_ERROR;
     }
     return FLAC__STREAM_DECODER_SEEK_STATUS_OK;
@@ -99,8 +99,8 @@ static FLAC__StreamDecoderSeekStatus FLAC_IoSeek(const FLAC__StreamDecoder *deco
 
 static FLAC__StreamDecoderTellStatus FLAC_IoTell(const FLAC__StreamDecoder *decoder, FLAC__uint64 *absolute_byte_offset, void *userdata)
 {
-    FLAC_UserData *d = (FLAC_UserData *) userdata;
-    const Sint64 pos = SDL_TellIO(d->io);
+    FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
+    const Sint64 pos = SDL_TellIO(tdata->io);
     if (pos < 0) {
         return FLAC__STREAM_DECODER_TELL_STATUS_ERROR;
     }
@@ -110,8 +110,8 @@ static FLAC__StreamDecoderTellStatus FLAC_IoTell(const FLAC__StreamDecoder *deco
 
 static FLAC__StreamDecoderLengthStatus FLAC_IoLength(const FLAC__StreamDecoder *decoder, FLAC__uint64 *stream_length, void *userdata)
 {
-    FLAC_UserData *d = (FLAC_UserData *) userdata;
-    const Sint64 iolen = SDL_GetIOSize(d->io);
+    FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
+    const Sint64 iolen = SDL_GetIOSize(tdata->io);
     if (iolen < 0) {
         return FLAC__STREAM_DECODER_LENGTH_STATUS_ERROR;
     }
@@ -121,9 +121,9 @@ static FLAC__StreamDecoderLengthStatus FLAC_IoLength(const FLAC__StreamDecoder *
 
 static FLAC__bool FLAC_IoEOF(const FLAC__StreamDecoder *decoder, void *userdata)
 {
-    FLAC_UserData *d = (FLAC_UserData *) userdata;
+    FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
     // these are either ConstMem or ClampIO streams, so this should be fast in either case.
-    return SDL_TellIO(d->io) >= SDL_GetIOSize(d->io);
+    return SDL_TellIO(tdata->io) >= SDL_GetIOSize(tdata->io);
 }
 
 static FLAC__StreamDecoderWriteStatus FLAC_IoWriteNoOp(const FLAC__StreamDecoder *decoder, const FLAC__Frame *frame, const FLAC__int32 *const buffer[], void *userdata)
@@ -133,39 +133,39 @@ static FLAC__StreamDecoderWriteStatus FLAC_IoWriteNoOp(const FLAC__StreamDecoder
 
 static FLAC__StreamDecoderWriteStatus FLAC_IoWrite(const FLAC__StreamDecoder *decoder, const FLAC__Frame *frame, const FLAC__int32 *const buffer[], void *userdata)
 {
-    FLAC_UserData *d = (FLAC_UserData *) userdata;
-    SDL_AudioStream *stream = d->stream;
+    FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
+    SDL_AudioStream *stream = tdata->stream;
     const int channels = (int) frame->header.channels;
 
     // !!! FIXME: this is kinda gross, but FLAC 3-channel is FL, FR, FC, whereas SDL is FL, FR, LFE...we don't have a "front center" channel until 5.1 output.  :/  The channel mask thing Sam wants in SDL3 would fix this.
     const int sdlchannels = (channels == 3) ? 6 : channels;
 
     // change the stream format if we're suddenly getting data in a different format. I assume this can happen if you chain FLAC files together.
-    if ((d->spec.freq != (int) frame->header.sample_rate) || (d->spec.channels != sdlchannels) || (d->bits_per_sample != (int) frame->header.bits_per_sample)) {
-        d->bits_per_sample = (int) frame->header.bits_per_sample;
-        d->spec.freq = (int) frame->header.sample_rate;
-        d->spec.channels = sdlchannels;
+    if ((tdata->spec.freq != (int) frame->header.sample_rate) || (tdata->spec.channels != sdlchannels) || (tdata->bits_per_sample != (int) frame->header.bits_per_sample)) {
+        tdata->bits_per_sample = (int) frame->header.bits_per_sample;
+        tdata->spec.freq = (int) frame->header.sample_rate;
+        tdata->spec.channels = sdlchannels;
         // decoded FLAC data is always int, from 4 to 32 bits, apparently.
-        if (d->bits_per_sample <= 8) {
-            d->spec.format = SDL_AUDIO_S8;
-        } else if (d->bits_per_sample <= 16) {
-            d->spec.format = SDL_AUDIO_S16;
-        } else if (d->bits_per_sample <= 32) {
-            d->spec.format = SDL_AUDIO_S32;
+        if (tdata->bits_per_sample <= 8) {
+            tdata->spec.format = SDL_AUDIO_S8;
+        } else if (tdata->bits_per_sample <= 16) {
+            tdata->spec.format = SDL_AUDIO_S16;
+        } else if (tdata->bits_per_sample <= 32) {
+            tdata->spec.format = SDL_AUDIO_S32;
         }
-        SDL_SetAudioStreamFormat(stream, &d->spec, NULL);
+        SDL_SetAudioStreamFormat(stream, &tdata->spec, NULL);
     }
 
     const size_t samples = (size_t) frame->header.blocksize;
-    const size_t onebuflen = ((size_t) SDL_AUDIO_BYTESIZE(d->spec.format)) * samples;
+    const size_t onebuflen = ((size_t) SDL_AUDIO_BYTESIZE(tdata->spec.format)) * samples;
     const size_t buflen = onebuflen * channels;
-    if (d->cvtbuflen < buflen) {
-        void *ptr = SDL_realloc(d->cvtbuf, buflen);
+    if (tdata->cvtbuflen < buflen) {
+        void *ptr = SDL_realloc(tdata->cvtbuf, buflen);
         if (!ptr) {
             return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
         }
-        d->cvtbuf = (Uint8 *) ptr;
-        d->cvtbuflen = buflen;
+        tdata->cvtbuf = (Uint8 *) ptr;
+        tdata->cvtbuflen = buflen;
     }
 
     void *channel_arrays[32];
@@ -174,10 +174,10 @@ static FLAC__StreamDecoderWriteStatus FLAC_IoWrite(const FLAC__StreamDecoder *de
     // (If we padded out to 5.1 to get a front-center channel, the unnecessary channels happen
     //   to be at the end, so it'll assume those padded channels are silent.)
     for (int i = 0; i < channels; i++) {
-        channel_arrays[i] = d->cvtbuf + (i * onebuflen);
+        channel_arrays[i] = tdata->cvtbuf + (i * onebuflen);
     }
 
-    const int shift = SDL_AUDIO_BITSIZE(d->spec.format) - d->bits_per_sample;
+    const int shift = SDL_AUDIO_BITSIZE(tdata->spec.format) - tdata->bits_per_sample;
 
     #define PREP_CHANNEL_ARRAY(typ) { \
         for (int channel = 0; channel < channels; channel++) { \
@@ -189,7 +189,7 @@ static FLAC__StreamDecoderWriteStatus FLAC_IoWrite(const FLAC__StreamDecoder *de
         } \
     }
 
-    switch (d->spec.format) {
+    switch (tdata->spec.format) {
         case SDL_AUDIO_S8: PREP_CHANNEL_ARRAY(Sint8); break;
         case SDL_AUDIO_S16: PREP_CHANNEL_ARRAY(Sint16); break;
         case SDL_AUDIO_S32: PREP_CHANNEL_ARRAY(Sint32); break;
@@ -205,21 +205,21 @@ static FLAC__StreamDecoderWriteStatus FLAC_IoWrite(const FLAC__StreamDecoder *de
 
 static void FLAC_IoMetadata(const FLAC__StreamDecoder *decoder, const FLAC__StreamMetadata *metadata, void *userdata)
 {
-    FLAC_UserData *d = (FLAC_UserData *) userdata;
-    FLAC_AudioUserData *payload = (FLAC_AudioUserData *) d->payload;  // cast away constness here. This metadata callback is when we're initializing payload.
+    FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
+    FLAC_AudioData *adata = (FLAC_AudioData *) tdata->adata;  // cast away constness here. This metadata callback is when we're initializing adata.
 
     if (metadata->type == FLAC__METADATA_TYPE_STREAMINFO) {
-        d->spec.freq = metadata->data.stream_info.sample_rate;
-        d->spec.channels = metadata->data.stream_info.channels;   // (if we need the 3-channel map magic, it'll notice spec.channels is wrong when we get to FLAC_IoWrite and set it up.)
-        d->bits_per_sample = (int) metadata->data.stream_info.bits_per_sample;
+        tdata->spec.freq = metadata->data.stream_info.sample_rate;
+        tdata->spec.channels = metadata->data.stream_info.channels;   // (if we need the 3-channel map magic, it'll notice spec.channels is wrong when we get to FLAC_IoWrite and set it up.)
+        tdata->bits_per_sample = (int) metadata->data.stream_info.bits_per_sample;
 
         // decoded FLAC data is always int, from 4 to 32 bits, apparently.
-        if (d->bits_per_sample <= 8) {
-            d->spec.format = SDL_AUDIO_S8;
-        } else if (d->bits_per_sample <= 16) {
-            d->spec.format = SDL_AUDIO_S16;
-        } else if (d->bits_per_sample <= 32) {
-            d->spec.format = SDL_AUDIO_S32;
+        if (tdata->bits_per_sample <= 8) {
+            tdata->spec.format = SDL_AUDIO_S8;
+        } else if (tdata->bits_per_sample <= 16) {
+            tdata->spec.format = SDL_AUDIO_S16;
+        } else if (tdata->bits_per_sample <= 32) {
+            tdata->spec.format = SDL_AUDIO_S32;
         }
     } else if (metadata->type == FLAC__METADATA_TYPE_VORBIS_COMMENT) {
         const FLAC__StreamMetadata_VorbisComment *vc = &metadata->data.vorbis_comment;
@@ -229,7 +229,7 @@ static void FLAC_IoMetadata(const FLAC__StreamDecoder *decoder, const FLAC__Stre
             for (int i = 0; i < num_comments; i++) {
             	comments[i] = (char *) vc->comments[i].entry;
             }
-            MIX_ParseOggComments(payload->props, d->spec.freq, (const char *) vc->vendor_string.entry, (const char * const *) comments, num_comments, &payload->loop_start, &payload->loop_end, &payload->loop_len);
+            MIX_ParseOggComments(adata->props, tdata->spec.freq, (const char *) vc->vendor_string.entry, (const char * const *) comments, num_comments, &adata->loop_start, &adata->loop_end, &adata->loop_len);
             SDL_free(comments);
         }
     }
@@ -277,8 +277,8 @@ static bool SDLCALL FLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
         return false;
     }
 
-    FLAC_UserData d;
-    SDL_zero(d);
+    FLAC_TrackData d;
+    SDL_zero(tdata);
     d.io = io;
 
     d.decoder = flac.FLAC__stream_decoder_new();
@@ -288,16 +288,16 @@ static bool SDLCALL FLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
 
     flac.FLAC__stream_decoder_set_metadata_respond(d.decoder, FLAC__METADATA_TYPE_VORBIS_COMMENT);
 
-    FLAC_AudioUserData *payload = (FLAC_AudioUserData *) SDL_calloc(1, sizeof (*payload));
-    if (!payload) {
+    FLAC_AudioData *adata = (FLAC_AudioData *) SDL_calloc(1, sizeof (*adata));
+    if (!adata) {
         flac.FLAC__stream_decoder_delete(d.decoder);
         return false;
     }
 
-    payload->is_ogg_stream = is_ogg_stream;
-    payload->props = props;
+    adata->is_ogg_stream = is_ogg_stream;
+    adata->props = props;
 
-    d.payload = payload;
+    d.adata = adata;
 
     FLAC__StreamDecoderInitStatus ret;
     if (is_ogg_stream) {
@@ -322,8 +322,8 @@ static bool SDLCALL FLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
         SDL_SetError("FLAC__stream_decoder_process_until_end_of_metadata() failed");
     }
 
-    // metadata processing should have filled in several things in `payload`.
-    payload->props = 0;  // metadata callbacks needed this, but don't store this past this function.
+    // metadata processing should have filled in several things in `adata`.
+    adata->props = 0;  // metadata callbacks needed this, but don't store this past this function.
 
     // now rewind, load the whole thing to memory, and use that buffer for future processing.
     if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {
@@ -335,74 +335,74 @@ static bool SDLCALL FLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
         return false;
     }
 
-    payload->data = data;
-    payload->datalen = datalen;
+    adata->data = data;
+    adata->datalen = datalen;
 
     SDL_copyp(spec, &d.spec);
     *duration_frames = total_frames;
-    *audio_userdata = payload;
+    *audio_userdata = adata;
 
     return true;
 }
 
-bool SDLCALL FLAC_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+bool SDLCALL FLAC_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
-    FLAC_UserData *d = (FLAC_UserData *) SDL_calloc(1, sizeof (*d));
-    if (!d) {
+    FLAC_TrackData *tdata = (FLAC_TrackData *) SDL_calloc(1, sizeof (*tdata));
+    if (!tdata) {
         return false;
     }
 
-    const FLAC_AudioUserData *payload = (const FLAC_AudioUserData *) audio_userdata;
-    d->payload = payload;
-    d->io = SDL_IOFromConstMem(payload->data, payload->datalen);
-    if (!d->io) {
-        SDL_free(d);
+    const FLAC_AudioData *adata = (const FLAC_AudioData *) audio_userdata;
+    tdata->adata = adata;
+    tdata->io = SDL_IOFromConstMem(adata->data, adata->datalen);
+    if (!tdata->io) {
+        SDL_free(tdata);
         return false;
     }
 
-    d->decoder = flac.FLAC__stream_decoder_new();
-    if (!d->decoder) {
-        SDL_CloseIO(d->io);
-        SDL_free(d);
+    tdata->decoder = flac.FLAC__stream_decoder_new();
+    if (!tdata->decoder) {
+        SDL_CloseIO(tdata->io);
+        SDL_free(tdata);
         return SDL_SetError("FLAC__stream_decoder_new() failed");
     }
 
     FLAC__StreamDecoderInitStatus ret;
-    if (payload->is_ogg_stream) {
-        ret = flac.FLAC__stream_decoder_init_ogg_stream(d->decoder, FLAC_IoRead, FLAC_IoSeek, FLAC_IoTell, FLAC_IoLength, FLAC_IoEOF, FLAC_IoWrite, FLAC_IoMetadataNoOp, FLAC_IoError, d);
+    if (adata->is_ogg_stream) {
+        ret = flac.FLAC__stream_decoder_init_ogg_stream(tdata->decoder, FLAC_IoRead, FLAC_IoSeek, FLAC_IoTell, FLAC_IoLength, FLAC_IoEOF, FLAC_IoWrite, FLAC_IoMetadataNoOp, FLAC_IoError, d);
     } else {
-        ret = flac.FLAC__stream_decoder_init_stream(d->decoder, FLAC_IoRead, FLAC_IoSeek, FLAC_IoTell, FLAC_IoLength, FLAC_IoEOF, FLAC_IoWrite, FLAC_IoMetadataNoOp, FLAC_IoError, d);
+        ret = flac.FLAC__stream_decoder_init_stream(tdata->decoder, FLAC_IoRead, FLAC_IoSeek, FLAC_IoTell, FLAC_IoLength, FLAC_IoEOF, FLAC_IoWrite, FLAC_IoMetadataNoOp, FLAC_IoError, d);
     }
 
     if (ret != FLAC__STREAM_DECODER_INIT_STATUS_OK) {
-        flac.FLAC__stream_decoder_delete(d->decoder);
-        SDL_CloseIO(d->io);
-        SDL_free(d);
+        flac.FLAC__stream_decoder_delete(tdata->decoder);
+        SDL_CloseIO(tdata->io);
+        SDL_free(tdata);
         return SDL_SetError("FLAC__stream_decoder_init_stream() failed");
     }
 
-    if (!flac.FLAC__stream_decoder_process_until_end_of_metadata(d->decoder)) {
-        flac.FLAC__stream_decoder_finish(d->decoder);
-        flac.FLAC__stream_decoder_delete(d->decoder);
-        SDL_CloseIO(d->io);
-        SDL_free(d);
+    if (!flac.FLAC__stream_decoder_process_until_end_of_metadata(tdata->decoder)) {
+        flac.FLAC__stream_decoder_finish(tdata->decoder);
+        flac.FLAC__stream_decoder_delete(tdata->decoder);
+        SDL_CloseIO(tdata->io);
+        SDL_free(tdata);
         SDL_SetError("FLAC__stream_decoder_process_until_end_of_metadata() failed");
     }
 
-    SDL_copyp(&d->spec, spec);
+    SDL_copyp(&tdata->spec, spec);
 
-    *userdata = d;
+    *track_userdata = tdata;
     return true;
 }
 
 bool SDLCALL FLAC_decode(void *userdata, SDL_AudioStream *stream)
 {
-    FLAC_UserData *d = (FLAC_UserData *) userdata;
-    d->stream = stream;
+    FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
+    tdata->stream = stream;
 
-    if (!flac.FLAC__stream_decoder_process_single(d->decoder)) {  // write callback will fill in stream. Might fill 0 if it hit a metadata block, but the higher level loops to get what it needs.
+    if (!flac.FLAC__stream_decoder_process_single(tdata->decoder)) {  // write callback will fill in stream. Might fill 0 if it hit a metadata block, but the higher level loops to get what it needs.
         return false;
-    } else if (flac.FLAC__stream_decoder_get_state(d->decoder) == FLAC__STREAM_DECODER_END_OF_STREAM) {
+    } else if (flac.FLAC__stream_decoder_get_state(tdata->decoder) == FLAC__STREAM_DECODER_END_OF_STREAM) {
         return false;  // we're done.
     }
 
@@ -411,10 +411,10 @@ bool SDLCALL FLAC_decode(void *userdata, SDL_AudioStream *stream)
 
 bool SDLCALL FLAC_seek(void *userdata, Uint64 frame)
 {
-    FLAC_UserData *d = (FLAC_UserData *) userdata;
-    if (!flac.FLAC__stream_decoder_seek_absolute(d->decoder, frame)) {
-        if (flac.FLAC__stream_decoder_get_state(d->decoder) == FLAC__STREAM_DECODER_SEEK_ERROR) {
-            flac.FLAC__stream_decoder_flush(d->decoder);
+    FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
+    if (!flac.FLAC__stream_decoder_seek_absolute(tdata->decoder, frame)) {
+        if (flac.FLAC__stream_decoder_get_state(tdata->decoder) == FLAC__STREAM_DECODER_SEEK_ERROR) {
+            flac.FLAC__stream_decoder_flush(tdata->decoder);
         }
         return SDL_SetError("Seeking of FLAC stream failed: libFLAC seek failed.");
     }
@@ -423,20 +423,20 @@ bool SDLCALL FLAC_seek(void *userdata, Uint64 frame)
 
 void SDLCALL FLAC_quit_track(void *userdata)
 {
-    FLAC_UserData *d = (FLAC_UserData *) userdata;
-    d->stream = NULL;
-    flac.FLAC__stream_decoder_finish(d->decoder);
-    flac.FLAC__stream_decoder_delete(d->decoder);
-    SDL_CloseIO(d->io);
-    SDL_free(d->cvtbuf);
-    SDL_free(d);
+    FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
+    tdata->stream = NULL;
+    flac.FLAC__stream_decoder_finish(tdata->decoder);
+    flac.FLAC__stream_decoder_delete(tdata->decoder);
+    SDL_CloseIO(tdata->io);
+    SDL_free(tdata->cvtbuf);
+    SDL_free(tdata);
 }
 
 void SDLCALL FLAC_quit_audio(void *audio_userdata)
 {
-    FLAC_AudioUserData *d = (FLAC_AudioUserData *) audio_userdata;
-    SDL_free((void *) d->data);
-    SDL_free(d);
+    FLAC_AudioData *tdata = (FLAC_AudioData *) audio_userdata;
+    SDL_free((void *) tdata->data);
+    SDL_free(tdata);
 }
 
 MIX_Decoder MIX_Decoder_FLAC = {

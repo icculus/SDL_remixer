@@ -46,17 +46,17 @@
 #include "SDL_mixer_loader.h"
 
 
-typedef struct GME_AudioUserData
+typedef struct GME_AudioData
 {
     const Uint8 *data;
     size_t datalen;
-} GME_AudioUserData;
+} GME_AudioData;
 
-typedef struct GME_UserData
+typedef struct GME_TrackData
 {
-    const GME_AudioUserData *payload;
+    const GME_AudioData *adata;
     Music_Emu *emu;
-} GME_UserData;
+} GME_TrackData;
 
 
 static bool SDLCALL GME_init(void)
@@ -130,70 +130,70 @@ static bool SDLCALL GME_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
 
     gme.gme_delete(emu);
 
-    GME_AudioUserData *payload = (GME_AudioUserData *) SDL_calloc(1, sizeof (*payload));
-    if (!payload) {
+    GME_AudioData *adata = (GME_AudioData *) SDL_calloc(1, sizeof (*adata));
+    if (!adata) {
         SDL_free(data);
         return false;
     }
 
-    payload->data = data;
-    payload->datalen = datalen;
+    adata->data = data;
+    adata->datalen = datalen;
 
     // libgme only outputs Sint16 stereo data.
     spec->format = SDL_AUDIO_S16;
     spec->channels = 2;
     // libgme generates in whatever sample rate, so use the current device spec->freq.
 
-    *audio_userdata = payload;
+    *audio_userdata = adata;
 
     return true;
 }
 
-bool SDLCALL GME_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+bool SDLCALL GME_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
-    GME_UserData *d = (GME_UserData *) SDL_calloc(1, sizeof (*d));
-    if (!d) {
+    GME_TrackData *tdata = (GME_TrackData *) SDL_calloc(1, sizeof (*tdata));
+    if (!tdata) {
         return false;
     }
 
-    const GME_AudioUserData *payload = (const GME_AudioUserData *) audio_userdata;
+    const GME_AudioData *adata = (const GME_AudioData *) audio_userdata;
 
-    d->payload = payload;
+    tdata->adata = adata;
 
-    gme_err_t err = gme.gme_open_data(payload->data, (long)payload->datalen, &d->emu, spec->freq);
+    gme_err_t err = gme.gme_open_data(adata->data, (long)adata->datalen, &tdata->emu, spec->freq);
     if (err) {
-        SDL_free(d);
+        SDL_free(tdata);
         return SDL_SetError("gme_open_data failed: %s", err);
     }
 
     // Set this flag BEFORE calling the gme_start_track() to fix an inability to loop forever
     if (gme.gme_set_autoload_playback_limit) {
-        gme.gme_set_autoload_playback_limit(d->emu, 0);
+        gme.gme_set_autoload_playback_limit(tdata->emu, 0);
     }
 
-    err = gme.gme_start_track(d->emu, 0);
+    err = gme.gme_start_track(tdata->emu, 0);
     if (err) {
-        gme.gme_delete(d->emu);
-        SDL_free(d);
+        gme.gme_delete(tdata->emu);
+        SDL_free(tdata);
         return SDL_SetError("gme_start_track failed: %s", err);
     }
 
-    *userdata = d;
+    *track_userdata = tdata;
 
     return true;
 }
 
 bool SDLCALL GME_decode(void *userdata, SDL_AudioStream *stream)
 {
-    GME_UserData *d = (GME_UserData *) userdata;
-    //const GME_AudioUserData *payload = d->payload;
+    GME_TrackData *tdata = (GME_TrackData *) userdata;
+    //const GME_AudioData *adata = tdata->adata;
 
-    if (gme.gme_track_ended(d->emu)) {
+    if (gme.gme_track_ended(tdata->emu)) {
         return false;  // all done.
     }
 
     Sint16 samples[256];
-    gme_err_t err = gme.gme_play(d->emu, SDL_arraysize(samples), (short*) samples);
+    gme_err_t err = gme.gme_play(tdata->emu, SDL_arraysize(samples), (short*) samples);
     if (err != NULL) {
         return SDL_SetError("GME: %s", err);  // i guess we're done.
     }
@@ -205,23 +205,23 @@ bool SDLCALL GME_decode(void *userdata, SDL_AudioStream *stream)
 
 bool SDLCALL GME_seek(void *userdata, Uint64 frame)
 {
-    GME_UserData *d = (GME_UserData *) userdata;
-    gme_err_t err = gme.gme_seek_samples(d->emu, (int) frame);
+    GME_TrackData *tdata = (GME_TrackData *) userdata;
+    gme_err_t err = gme.gme_seek_samples(tdata->emu, (int) frame);
     return err ? SDL_SetError("gme_seek_samples failed: %s", err) : true;
 }
 
 void SDLCALL GME_quit_track(void *userdata)
 {
-    GME_UserData *d = (GME_UserData *) userdata;
-    gme.gme_delete(d->emu);
-    SDL_free(d);
+    GME_TrackData *tdata = (GME_TrackData *) userdata;
+    gme.gme_delete(tdata->emu);
+    SDL_free(tdata);
 }
 
 void SDLCALL GME_quit_audio(void *audio_userdata)
 {
-    GME_AudioUserData *d = (GME_AudioUserData *) audio_userdata;
-    SDL_free((void *) d->data);
-    SDL_free(d);
+    GME_AudioData *tdata = (GME_AudioData *) audio_userdata;
+    SDL_free((void *) tdata->data);
+    SDL_free(tdata);
 }
 
 MIX_Decoder MIX_Decoder_GME = {

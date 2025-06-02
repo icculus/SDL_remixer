@@ -237,7 +237,7 @@ static bool SDLCALL AIFF_init_audio(SDL_IOStream *src, SDL_AudioSpec *spec, SDL_
 }
 
 
-// AIFF_init_audio parses metadata and finds the payload, and then it's just raw PCM data.
+// AIFF_init_audio parses metadata and finds the adata, and then it's just raw PCM data.
 MIX_Decoder MIX_Decoder_AIFF = {
     "AIFF",
     NULL, // init

@@ -76,18 +76,18 @@
 #include "SDL_mixer_loader.h"
 
 
-typedef struct MPG123_AudioUserData
+typedef struct MPG123_AudioData
 {
     const Uint8 *data;
     size_t datalen;
-} MPG123_AudioUserData;
+} MPG123_AudioData;
 
-typedef struct MPG123_UserData
+typedef struct MPG123_TrackData
 {
-    const MPG123_AudioUserData *payload;
+    const MPG123_AudioData *adata;
     SDL_IOStream *io;
     mpg123_handle *handle;
-} MPG123_UserData;
+} MPG123_TrackData;
 
 
 static bool SDLCALL MPG123_init(void)
@@ -222,7 +222,7 @@ static bool SDLCALL MPG123_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
         }
     }
 
-    MPG123_AudioUserData *payload = NULL;
+    MPG123_AudioData *adata = NULL;
     const long *rates = NULL;
     size_t num_rates = 0;
     size_t datalen = 0;
@@ -303,15 +303,15 @@ static bool SDLCALL MPG123_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
         goto failed;
     }
 
-    payload = (MPG123_AudioUserData *) SDL_calloc(1, sizeof (*payload));
-    if (!payload) {
+    adata = (MPG123_AudioData *) SDL_calloc(1, sizeof (*adata));
+    if (!adata) {
         goto failed;
     }
 
-    payload->data = data;
-    payload->datalen = datalen;
+    adata->data = data;
+    adata->datalen = datalen;
 
-    *audio_userdata = payload;
+    *audio_userdata = adata;
 
     return true;
 
@@ -321,29 +321,29 @@ failed:
         mpg123.mpg123_delete(handle);
     }
     SDL_free(data);
-    SDL_free(payload);
+    SDL_free(adata);
     return false;
 }
 
-bool SDLCALL MPG123_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+bool SDLCALL MPG123_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
-    MPG123_UserData *d = (MPG123_UserData *) SDL_calloc(1, sizeof (*d));
-    if (!d) {
+    MPG123_TrackData *tdata = (MPG123_TrackData *) SDL_calloc(1, sizeof (*tdata));
+    if (!tdata) {
         return false;
     }
 
-    const MPG123_AudioUserData *payload = (const MPG123_AudioUserData *) audio_userdata;
+    const MPG123_AudioData *adata = (const MPG123_AudioData *) audio_userdata;
 
-    SDL_IOStream *io = SDL_IOFromConstMem(payload->data, payload->datalen);
+    SDL_IOStream *io = SDL_IOFromConstMem(adata->data, adata->datalen);
     if (!io) {
-        SDL_free(d);
+        SDL_free(tdata);
         return false;
     }
 
     int result = 0;
     mpg123_handle *handle = mpg123.mpg123_new(NULL, &result);
     if (result != MPG123_OK) {
-        SDL_free(d);
+        SDL_free(tdata);
         return SDL_SetError("mpg123_new failed");
     }
 
@@ -352,7 +352,7 @@ bool SDLCALL MPG123_init_track(void *audio_userdata, const SDL_AudioSpec *spec, 
     result = mpg123.mpg123_replace_reader_handle(handle, MPG123_IoRead, MPG123_IoSeek, MPG123_IoClose);
     if (result != MPG123_OK) {
         SDL_SetError("mpg123_replace_reader_handle: %s", mpg_err(handle, result));
-        SDL_free(d);
+        SDL_free(tdata);
         mpg123.mpg123_delete(handle);
         return false;
     }
@@ -361,7 +361,7 @@ bool SDLCALL MPG123_init_track(void *audio_userdata, const SDL_AudioSpec *spec, 
     result = mpg123.mpg123_format_none(handle);
     if (result != MPG123_OK) {
         SDL_SetError("mpg123_format_none: %s", mpg_err(handle, result));
-        SDL_free(d);
+        SDL_free(tdata);
         mpg123.mpg123_delete(handle);
         return false;
     }
@@ -382,25 +382,25 @@ bool SDLCALL MPG123_init_track(void *audio_userdata, const SDL_AudioSpec *spec, 
     result = mpg123.mpg123_open_handle(handle, io);
     if (result != MPG123_OK) {
         SDL_SetError("mpg123_open_handle: %s", mpg_err(handle, result));
-        SDL_free(d);
+        SDL_free(tdata);
         mpg123.mpg123_delete(handle);
         return false;
     }
 
     // !!! FIXME: should we do this? It makes seeking better, maybe?  mpg123.mpg123_scan(handle);
 
-    d->io = io;
-    d->payload = payload;
-    d->handle = handle;
+    tdata->io = io;
+    tdata->adata = adata;
+    tdata->handle = handle;
 
-    *userdata = d;
+    *track_userdata = tdata;
 
     return true;
 }
 
 bool SDLCALL MPG123_decode(void *userdata, SDL_AudioStream *stream)
 {
-    MPG123_UserData *d = (MPG123_UserData *) userdata;
+    MPG123_TrackData *tdata = (MPG123_TrackData *) userdata;
     SDL_AudioSpec spec;
     int result;
     size_t amount = 0;
@@ -408,12 +408,12 @@ bool SDLCALL MPG123_decode(void *userdata, SDL_AudioStream *stream)
     int channels, encoding;
     Uint8 buffer[1024];
 
-    result = mpg123.mpg123_read(d->handle, buffer, sizeof (buffer), &amount);
+    result = mpg123.mpg123_read(tdata->handle, buffer, sizeof (buffer), &amount);
 
     if (result == MPG123_NEW_FORMAT) {
-        result = mpg123.mpg123_getformat(d->handle, &rate, &channels, &encoding);
+        result = mpg123.mpg123_getformat(tdata->handle, &rate, &channels, &encoding);
         if (result != MPG123_OK) {
-            return SDL_SetError("mpg123_getformat: %s", mpg_err(d->handle, result));
+            return SDL_SetError("mpg123_getformat: %s", mpg_err(tdata->handle, result));
         }
 
         #ifdef DEBUG_MPG123
@@ -433,7 +433,7 @@ bool SDLCALL MPG123_decode(void *userdata, SDL_AudioStream *stream)
     }
 
     if ((result != MPG123_OK) && (result != MPG123_DONE)) {
-        SDL_SetError("mpg123_read: %s", mpg_err(d->handle, result));
+        SDL_SetError("mpg123_read: %s", mpg_err(tdata->handle, result));
     }
 
     return (result == MPG123_OK);
@@ -441,25 +441,25 @@ bool SDLCALL MPG123_decode(void *userdata, SDL_AudioStream *stream)
 
 bool SDLCALL MPG123_seek(void *userdata, Uint64 frame)
 {
-    MPG123_UserData *d = (MPG123_UserData *) userdata;
-    const off_t rc = mpg123.mpg123_seek(d->handle, (off_t) frame, SEEK_SET);
-    return (rc < 0) ? SDL_SetError("mpg123_seek:%s", mpg_err(d->handle, rc)) : true;
+    MPG123_TrackData *tdata = (MPG123_TrackData *) userdata;
+    const off_t rc = mpg123.mpg123_seek(tdata->handle, (off_t) frame, SEEK_SET);
+    return (rc < 0) ? SDL_SetError("mpg123_seek:%s", mpg_err(tdata->handle, rc)) : true;
 }
 
 void SDLCALL MPG123_quit_track(void *userdata)
 {
-    MPG123_UserData *d = (MPG123_UserData *) userdata;
-    mpg123.mpg123_close(d->handle);
-    mpg123.mpg123_delete(d->handle);
-    SDL_CloseIO(d->io);
-    SDL_free(d);
+    MPG123_TrackData *tdata = (MPG123_TrackData *) userdata;
+    mpg123.mpg123_close(tdata->handle);
+    mpg123.mpg123_delete(tdata->handle);
+    SDL_CloseIO(tdata->io);
+    SDL_free(tdata);
 }
 
 void SDLCALL MPG123_quit_audio(void *audio_userdata)
 {
-    MPG123_AudioUserData *d = (MPG123_AudioUserData *) audio_userdata;
-    SDL_free((void *) d->data);
-    SDL_free(d);
+    MPG123_AudioData *tdata = (MPG123_AudioData *) audio_userdata;
+    SDL_free((void *) tdata->data);
+    SDL_free(tdata);
 }
 
 MIX_Decoder MIX_Decoder_MPG123 = {

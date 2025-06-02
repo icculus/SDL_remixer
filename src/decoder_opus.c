@@ -52,7 +52,7 @@
 #include "SDL_mixer_loader.h"
 
 
-typedef struct OPUS_AudioUserData
+typedef struct OPUS_AudioData
 {
     const Uint8 *data;
     size_t datalen;
@@ -60,16 +60,16 @@ typedef struct OPUS_AudioUserData
     Sint64 loop_start;
     Sint64 loop_end;
     Sint64 loop_len;
-} OPUS_AudioUserData;
+} OPUS_AudioData;
 
-typedef struct OPUS_UserData
+typedef struct OPUS_TrackData
 {
-    const OPUS_AudioUserData *payload;
-    SDL_IOStream *io;  // a const-mem IOStream for accessing the payload's data.
+    const OPUS_AudioData *adata;
+    SDL_IOStream *io;  // a const-mem IOStream for accessing the adata's data.
     OggOpusFile *of;
     int current_channels;
     int current_bitstream;
-} OPUS_UserData;
+} OPUS_TrackData;
 
 
 static bool SDLCALL OPUS_init(void)
@@ -151,19 +151,19 @@ static bool SDLCALL OPUS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
         return false;
     }
 
-    OPUS_AudioUserData *payload = (OPUS_AudioUserData *) SDL_calloc(1, sizeof (*payload));
-    if (!payload) {
+    OPUS_AudioData *adata = (OPUS_AudioData *) SDL_calloc(1, sizeof (*adata));
+    if (!adata) {
         SDL_free(data);
         return false;
     }
 
-    payload->data = data;
-    payload->datalen = datalen;
+    adata->data = data;
+    adata->datalen = datalen;
 
     io = SDL_IOFromConstMem(data, datalen);  // switch over to a memory IOStream.
     if (!io) {  // uhoh.
         SDL_free(data);
-        SDL_free(payload);
+        SDL_free(adata);
         return false;
     }
 
@@ -172,7 +172,7 @@ static bool SDLCALL OPUS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
     if (!of) {
         SDL_CloseIO(io);
         SDL_free(data);
-        SDL_free(payload);
+        SDL_free(adata);
         return set_op_error("ov_open_callbacks", rc);
     }
 
@@ -181,7 +181,7 @@ static bool SDLCALL OPUS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
         opus.op_free(of);
         SDL_CloseIO(io);
         SDL_free(data);
-        SDL_free(payload);
+        SDL_free(adata);
         return SDL_SetError("Couldn't get Opus info; corrupt data?");
     }
 
@@ -191,108 +191,108 @@ static bool SDLCALL OPUS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
 
     const OpusTags *tags = opus.op_tags(of, -1);
     if (tags != NULL) {
-        MIX_ParseOggComments(props, spec->freq, tags->vendor, (const char * const *) tags->user_comments, tags->comments, &payload->loop_start, &payload->loop_end, &payload->loop_len);
+        MIX_ParseOggComments(props, spec->freq, tags->vendor, (const char * const *) tags->user_comments, tags->comments, &adata->loop_start, &adata->loop_end, &adata->loop_len);
     }
 
     opus.op_raw_seek(of, 0);  // !!! FIXME: it's not clear if this seek is necessary, but https://stackoverflow.com/a/72482773 suggests it might be, at least on older libvorbisfile releases...
     const Sint64 full_length = (Sint64) opus.op_pcm_total(of, -1);
-    payload->loop = ((payload->loop_end > 0) && (payload->loop_end <= full_length) && (payload->loop_start < payload->loop_end));
+    adata->loop = ((adata->loop_end > 0) && (adata->loop_end <= full_length) && (adata->loop_start < adata->loop_end));
     opus.op_free(of);  // done with this instance. Tracks will maintain their own OggVorbis_File object.
     SDL_CloseIO(io);  // close our memory i/o.
 
-    *duration_frames = payload->loop ? MIX_DURATION_INFINITE : full_length;  // if looping, stream is infinite.
-    *audio_userdata = payload;
+    *duration_frames = adata->loop ? MIX_DURATION_INFINITE : full_length;  // if looping, stream is infinite.
+    *audio_userdata = adata;
 
     return true;
 }
 
-bool SDLCALL OPUS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+bool SDLCALL OPUS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
-    OPUS_UserData *d = (OPUS_UserData *) SDL_calloc(1, sizeof (*d));
-    if (!d) {
+    OPUS_TrackData *tdata = (OPUS_TrackData *) SDL_calloc(1, sizeof (*tdata));
+    if (!tdata) {
         return false;
     }
 
-    const OPUS_AudioUserData *payload = (const OPUS_AudioUserData *) audio_userdata;
+    const OPUS_AudioData *adata = (const OPUS_AudioData *) audio_userdata;
 
-    d->io = SDL_IOFromConstMem(payload->data, payload->datalen);
-    if (!d->io) {  // uhoh.
-        SDL_free(d);
+    tdata->io = SDL_IOFromConstMem(adata->data, adata->datalen);
+    if (!tdata->io) {  // uhoh.
+        SDL_free(tdata);
         return false;
     }
 
     // now open the memory buffer for serious processing.
     int rc = 0;
-    d->of = opus.op_open_callbacks(d->io, &OPUS_IoCallbacks, NULL, 0, &rc);
-    if (!d->of) {
-        SDL_CloseIO(d->io);
-        SDL_free(d);
+    tdata->of = opus.op_open_callbacks(tdata->io, &OPUS_IoCallbacks, NULL, 0, &rc);
+    if (!tdata->of) {
+        SDL_CloseIO(tdata->io);
+        SDL_free(tdata);
         return set_op_error("op_open_callbacks", rc);
     }
 
-    d->current_channels = spec->channels;
-    d->current_bitstream = -1;
-    d->payload = payload;
+    tdata->current_channels = spec->channels;
+    tdata->current_bitstream = -1;
+    tdata->adata = adata;
 
-    *userdata = d;
+    *track_userdata = tdata;
 
     return true;
 }
 
 bool SDLCALL OPUS_decode(void *userdata, SDL_AudioStream *stream)
 {
-    OPUS_UserData *d = (OPUS_UserData *) userdata;
-    int bitstream = d->current_bitstream;
+    OPUS_TrackData *tdata = (OPUS_TrackData *) userdata;
+    int bitstream = tdata->current_bitstream;
     float samples[256];
 
     // !!! FIXME: handle looping.
 
-    const int channels = d->current_channels;
-    const int amount = (int)opus.op_read_float(d->of, samples, SDL_arraysize(samples), &bitstream);
+    const int channels = tdata->current_channels;
+    const int amount = (int)opus.op_read_float(tdata->of, samples, SDL_arraysize(samples), &bitstream);
     if (amount < 0) {
         return set_op_error("op_read_float", amount);
     }
 
     SDL_assert((amount * channels) <= SDL_arraysize(samples));
 
-    if (bitstream != d->current_bitstream) {
-        const OpusHead *info = opus.op_head(d->of, -1);
+    if (bitstream != tdata->current_bitstream) {
+        const OpusHead *info = opus.op_head(tdata->of, -1);
         if (info) {  // this _shouldn't_ be NULL, but if it is, we're just going on without it and hoping the stream format didn't change.
-            if (d->current_channels != info->channel_count) {
+            if (tdata->current_channels != info->channel_count) {
                 const SDL_AudioSpec spec = { SDL_AUDIO_F32, info->channel_count, 48000 };
                 SDL_SetAudioStreamFormat(stream, &spec, NULL);
-                d->current_channels = info->channel_count;
+                tdata->current_channels = info->channel_count;
             }
         }
-        d->current_bitstream = bitstream;
+        tdata->current_bitstream = bitstream;
     }
 
-    SDL_PutAudioStreamData(stream, samples, amount * d->current_channels * sizeof (float));
+    SDL_PutAudioStreamData(stream, samples, amount * tdata->current_channels * sizeof (float));
 
     return (amount > 0);
 }
 
 bool SDLCALL OPUS_seek(void *userdata, Uint64 frame)
 {
-    OPUS_UserData *d = (OPUS_UserData *) userdata;
+    OPUS_TrackData *tdata = (OPUS_TrackData *) userdata;
     // !!! FIXME: I assume op_raw_seek is faster if we're seeking to start, but I could be wrong.
-    const int rc = (frame == 0) ? opus.op_raw_seek(d->of, 0) : opus.op_pcm_seek(d->of, (ogg_int64_t) frame);
+    const int rc = (frame == 0) ? opus.op_raw_seek(tdata->of, 0) : opus.op_pcm_seek(tdata->of, (ogg_int64_t) frame);
     return (rc == 0) ? true : set_op_error("op_pcm_seek", rc);
 }
 
 void SDLCALL OPUS_quit_track(void *userdata)
 {
-    OPUS_UserData *d = (OPUS_UserData *) userdata;
-    opus.op_free(d->of);
-    SDL_CloseIO(d->io);
-    SDL_free(d);
+    OPUS_TrackData *tdata = (OPUS_TrackData *) userdata;
+    opus.op_free(tdata->of);
+    SDL_CloseIO(tdata->io);
+    SDL_free(tdata);
 }
 
 void SDLCALL OPUS_quit_audio(void *audio_userdata)
 {
-    OPUS_AudioUserData *d = (OPUS_AudioUserData *) audio_userdata;
-    SDL_free((void *) d->data);
-    SDL_free(d);
+    OPUS_AudioData *tdata = (OPUS_AudioData *) audio_userdata;
+    SDL_free((void *) tdata->data);
+    SDL_free(tdata);
 }
 
 MIX_Decoder MIX_Decoder_OPUS = {

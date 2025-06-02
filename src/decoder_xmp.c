@@ -99,18 +99,18 @@ static bool SetLibXmpError(const char *function, int error)
     return SDL_SetError("%s: unknown error %d", function, error);
 }
 
-typedef struct XMP_AudioUserData
+typedef struct XMP_AudioData
 {
     const Uint8 *data;
     size_t datalen;
-} XMP_AudioUserData;
+} XMP_AudioData;
 
-typedef struct XMP_UserData
+typedef struct XMP_TrackData
 {
-    const XMP_AudioUserData *payload;
+    const XMP_AudioData *adata;
     int freq;
     xmp_context ctx;
-} XMP_UserData;
+} XMP_TrackData;
 
 
 static bool SDLCALL XMP_init(void)
@@ -199,75 +199,75 @@ static bool SDLCALL XMP_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
     libxmp.xmp_release_module(ctx);
     libxmp.xmp_free_context(ctx);
 
-    XMP_AudioUserData *payload = (XMP_AudioUserData *) SDL_calloc(1, sizeof (*payload));
-    if (!payload) {
+    XMP_AudioData *adata = (XMP_AudioData *) SDL_calloc(1, sizeof (*adata));
+    if (!adata) {
         SDL_free(data);
         return false;
     }
 
-    payload->data = data;
-    payload->datalen = datalen;
+    adata->data = data;
+    adata->datalen = datalen;
 
     // libxmp prefers to generate Sint16, stereo data.
     spec->format = SDL_AUDIO_S16;
     spec->channels = 2;
     // libxmp generates in whatever sample rate, so use the current device spec->freq.
 
-    *audio_userdata = payload;
+    *audio_userdata = adata;
 
     return true;
 }
 
-bool SDLCALL XMP_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+bool SDLCALL XMP_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
     int err;
 
-    XMP_UserData *d = (XMP_UserData *) SDL_calloc(1, sizeof (*d));
-    if (!d) {
+    XMP_TrackData *tdata = (XMP_TrackData *) SDL_calloc(1, sizeof (*tdata));
+    if (!tdata) {
         return false;
     }
 
-    const XMP_AudioUserData *payload = (const XMP_AudioUserData *) audio_userdata;
+    const XMP_AudioData *adata = (const XMP_AudioData *) audio_userdata;
 
-    d->payload = payload;
-    d->freq = spec->freq;
+    tdata->adata = adata;
+    tdata->freq = spec->freq;
 
-    d->ctx = libxmp.xmp_create_context();
-    if (!d->ctx) {
-        SDL_free(d);
+    tdata->ctx = libxmp.xmp_create_context();
+    if (!tdata->ctx) {
+        SDL_free(tdata);
         return SDL_OutOfMemory();
     }
 
-    err = libxmp.xmp_load_module_from_memory(d->ctx, payload->data, (long) payload->datalen);
+    err = libxmp.xmp_load_module_from_memory(tdata->ctx, adata->data, (long) adata->datalen);
     if (err) {
-        libxmp.xmp_free_context(d->ctx);
-        SDL_free(d);
+        libxmp.xmp_free_context(tdata->ctx);
+        SDL_free(tdata);
         return SetLibXmpError("xmp_load_module_from_memory", err);
     }
 
-    err = libxmp.xmp_start_player(d->ctx, spec->freq, 0);
+    err = libxmp.xmp_start_player(tdata->ctx, spec->freq, 0);
     if (err) {
-        libxmp.xmp_release_module(d->ctx);
-        libxmp.xmp_free_context(d->ctx);
-        SDL_free(d);
+        libxmp.xmp_release_module(tdata->ctx);
+        libxmp.xmp_free_context(tdata->ctx);
+        SDL_free(tdata);
         return SetLibXmpError("xmp_start_player", err);
     }
 
-    *userdata = d;
+    *track_userdata = tdata;
 
     return true;
 }
 
 bool SDLCALL XMP_decode(void *userdata, SDL_AudioStream *stream)
 {
-    XMP_UserData *d = (XMP_UserData *) userdata;
+    XMP_TrackData *tdata = (XMP_TrackData *) userdata;
 
-    if (libxmp.xmp_play_frame(d->ctx) < 0) {
+    if (libxmp.xmp_play_frame(tdata->ctx) < 0) {
         return false;  // either an error or EOF, either way we're done.
     }
 
     struct xmp_frame_info info;
-    libxmp.xmp_get_frame_info(d->ctx, &info);
+    libxmp.xmp_get_frame_info(tdata->ctx, &info);
 
     if (info.loop_count > 0) {
         return false;  // if we looped, we're at the EOF. !!! FIXME: do _all_ formats loop, or should we honor this?
@@ -280,26 +280,26 @@ bool SDLCALL XMP_decode(void *userdata, SDL_AudioStream *stream)
 
 bool SDLCALL XMP_seek(void *userdata, Uint64 frame)
 {
-    XMP_UserData *d = (XMP_UserData *) userdata;
-    const int err = libxmp.xmp_seek_time(d->ctx, (int) MIX_FramesToMS(d->freq, frame));
+    XMP_TrackData *tdata = (XMP_TrackData *) userdata;
+    const int err = libxmp.xmp_seek_time(tdata->ctx, (int) MIX_FramesToMS(tdata->freq, frame));
     return err ? SetLibXmpError("xmp_seek_time", err) : true;
 }
 
 void SDLCALL XMP_quit_track(void *userdata)
 {
-    XMP_UserData *d = (XMP_UserData *) userdata;
-    libxmp.xmp_stop_module(d->ctx);
-    libxmp.xmp_end_player(d->ctx);
-    libxmp.xmp_release_module(d->ctx);
-    libxmp.xmp_free_context(d->ctx);
-    SDL_free(d);
+    XMP_TrackData *tdata = (XMP_TrackData *) userdata;
+    libxmp.xmp_stop_module(tdata->ctx);
+    libxmp.xmp_end_player(tdata->ctx);
+    libxmp.xmp_release_module(tdata->ctx);
+    libxmp.xmp_free_context(tdata->ctx);
+    SDL_free(tdata);
 }
 
 void SDLCALL XMP_quit_audio(void *audio_userdata)
 {
-    XMP_AudioUserData *d = (XMP_AudioUserData *) audio_userdata;
-    SDL_free((void *) d->data);
-    SDL_free(d);
+    XMP_AudioData *tdata = (XMP_AudioData *) audio_userdata;
+    SDL_free((void *) tdata->data);
+    SDL_free(tdata);
 }
 
 MIX_Decoder MIX_Decoder_XMP = {

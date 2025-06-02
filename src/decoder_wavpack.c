@@ -274,7 +274,7 @@ static void decimation_reset(void *context)
 #endif // MUSIC_WAVPACK_DSD
 
 
-typedef struct WAVPACK_AudioUserData
+typedef struct WAVPACK_AudioData
 {
     const Uint8 *data;
     size_t datalen;
@@ -287,17 +287,17 @@ typedef struct WAVPACK_AudioUserData
     int mode;
     int decimation;
     SDL_AudioFormat format;
-} WAVPACK_AudioUserData;
+} WAVPACK_AudioData;
 
-typedef struct WAVPACK_UserData
+typedef struct WAVPACK_TrackData
 {
-    const WAVPACK_AudioUserData *payload;
-    SDL_IOStream *io;  // a const-mem IOStream for accessing the payload's data.
-    SDL_IOStream *wvcio;  // a const-mem IOStream for accessing the payload's correction data.
+    const WAVPACK_AudioData *adata;
+    SDL_IOStream *io;  // a const-mem IOStream for accessing the adata's data.
+    SDL_IOStream *wvcio;  // a const-mem IOStream for accessing the adata's correction data.
     WavpackContext *ctx;
     void *decimation_ctx;
     void *decode_buffer;
-} WAVPACK_UserData;
+} WAVPACK_TrackData;
 
 
 static bool SDLCALL WAVPACK_init(void)
@@ -385,8 +385,8 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
     }
 
     WavpackContext *ctx = NULL;
-    WAVPACK_AudioUserData *payload = (WAVPACK_AudioUserData *) SDL_calloc(1, sizeof (*payload));
-    if (!payload) {
+    WAVPACK_AudioData *adata = (WAVPACK_AudioData *) SDL_calloc(1, sizeof (*adata));
+    if (!adata) {
         goto failed;
     }
 
@@ -411,49 +411,49 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
         goto failed;
     }
 
-    payload->data = data;
-    payload->datalen = datalen;
-    payload->wvcdata = wvcdata;
-    payload->wvcdatalen = wvcdatalen;
-    payload->numsamples = wavpack.WavpackGetNumSamples64 ? wavpack.WavpackGetNumSamples64(ctx) : wavpack.WavpackGetNumSamples(ctx);
-    payload->bps = wavpack.WavpackGetBytesPerSample(ctx) << 3;
-    payload->mode = wavpack.WavpackGetMode(ctx);
-    payload->channels = (int) wavpack.WavpackGetNumChannels(ctx);
-    payload->samplerate = wavpack.WavpackGetSampleRate(ctx);
-    payload->decimation = 1;
+    adata->data = data;
+    adata->datalen = datalen;
+    adata->wvcdata = wvcdata;
+    adata->wvcdatalen = wvcdatalen;
+    adata->numsamples = wavpack.WavpackGetNumSamples64 ? wavpack.WavpackGetNumSamples64(ctx) : wavpack.WavpackGetNumSamples(ctx);
+    adata->bps = wavpack.WavpackGetBytesPerSample(ctx) << 3;
+    adata->mode = wavpack.WavpackGetMode(ctx);
+    adata->channels = (int) wavpack.WavpackGetNumChannels(ctx);
+    adata->samplerate = wavpack.WavpackGetSampleRate(ctx);
+    adata->decimation = 1;
 
     #ifdef MUSIC_WAVPACK_DSD
     // for very high sample rates (including DSD, which will normally be 352,800 Hz) decimate 4x here before sending on
-    if (payload->samplerate >= 256000) {
-        payload->decimation = 4;
+    if (adata->samplerate >= 256000) {
+        adata->decimation = 4;
     }
     #endif
 
     // library returns the samples in 8, 16, 24, or 32 bit depth, but
     // always in an int32_t[] buffer, in signed host-endian format.
-    switch (payload->bps) {
-        case 8: payload->format = SDL_AUDIO_S8; break;
-        case 16: payload->format = SDL_AUDIO_S16; break;
-        case 24: payload->format = SDL_AUDIO_S32; break;
-        case 32: payload->format = (payload->mode & MODE_FLOAT) ? SDL_AUDIO_F32 : SDL_AUDIO_S32; break;
+    switch (adata->bps) {
+        case 8: adata->format = SDL_AUDIO_S8; break;
+        case 16: adata->format = SDL_AUDIO_S16; break;
+        case 24: adata->format = SDL_AUDIO_S32; break;
+        case 32: adata->format = (adata->mode & MODE_FLOAT) ? SDL_AUDIO_F32 : SDL_AUDIO_S32; break;
         default: SDL_SetError("Unsupported WavPack bitdepth"); goto failed;  // uhoh.
     }
 
-    spec->format = payload->format;
-    spec->freq = (int) payload->samplerate / payload->decimation;
-    spec->channels = payload->channels;
+    spec->format = adata->format;
+    spec->freq = (int) adata->samplerate / adata->decimation;
+    spec->channels = adata->channels;
 
     #if WAVPACK_DBG
     SDL_Log("WavPack loader:");
     SDL_Log(" correction data: %s", wvcio ? "yes" : "no");
-    SDL_Log(" numsamples: %" SDL_PRIs64, (Sint64)payload->numsamples);
+    SDL_Log(" numsamples: %" SDL_PRIs64, (Sint64)adata->numsamples);
     SDL_Log(" samplerate: %d", spec->freq);
-    SDL_Log(" bitspersample: %d", payload->bps);
+    SDL_Log(" bitspersample: %d", adata->bps);
     SDL_Log(" channels: %d", spec->channels);
-    SDL_Log(" mode: 0x%x", payload->mode);
-    SDL_Log(" lossy: %s", (payload->mode & MODE_LOSSLESS) ? "false" : "true");
-    SDL_Log(" decimation: %d", payload->decimation);
-    SDL_Log(" duration: %f", payload->numsamples / (double)payload->samplerate);
+    SDL_Log(" mode: 0x%x", adata->mode);
+    SDL_Log(" lossy: %s", (adata->mode & MODE_LOSSLESS) ? "false" : "true");
+    SDL_Log(" decimation: %d", adata->decimation);
+    SDL_Log(" duration: %f", adata->numsamples / (double)adata->samplerate);
     #endif
 
     // WavPack files use other tag standards; their docs seem to favor APEv2 tags, but apparently
@@ -464,8 +464,8 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
     SDL_CloseIO(io);  // close our memory i/o.
     SDL_CloseIO(wvcio);  // close our memory i/o.
 
-    *duration_frames = (Sint64) payload->numsamples;
-    *audio_userdata = payload;
+    *duration_frames = (Sint64) adata->numsamples;
+    *audio_userdata = adata;
 
     return true;
 
@@ -475,73 +475,73 @@ failed:
     SDL_CloseIO(io);
     SDL_free(wvcdata);
     SDL_free(data);
-    SDL_free(payload);
+    SDL_free(adata);
     return false;
 }
 
-bool SDLCALL WAVPACK_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+bool SDLCALL WAVPACK_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
-    WAVPACK_UserData *d = (WAVPACK_UserData *) SDL_calloc(1, sizeof (*d));
-    if (!d) {
+    WAVPACK_TrackData *tdata = (WAVPACK_TrackData *) SDL_calloc(1, sizeof (*tdata));
+    if (!tdata) {
         return false;
     }
 
-    const WAVPACK_AudioUserData *payload = (const WAVPACK_AudioUserData *) audio_userdata;
+    const WAVPACK_AudioData *adata = (const WAVPACK_AudioData *) audio_userdata;
 
     char err[80];
 
-    d->io = SDL_IOFromConstMem(payload->data, payload->datalen);
-    if (!d->io) {  // uhoh.
+    tdata->io = SDL_IOFromConstMem(adata->data, adata->datalen);
+    if (!tdata->io) {  // uhoh.
         goto failed;
     }
 
-    if (payload->wvcdata) {
-        d->wvcio = SDL_IOFromConstMem(payload->wvcdata, payload->wvcdatalen);
-        if (!d->wvcio) {  // uhoh.
+    if (adata->wvcdata) {
+        tdata->wvcio = SDL_IOFromConstMem(adata->wvcdata, adata->wvcdatalen);
+        if (!tdata->wvcio) {  // uhoh.
             goto failed;
         }
     }
 
-    d->decode_buffer = SDL_malloc(DECODE_FRAMES * spec->channels * sizeof(int32_t) * payload->decimation);
-    if (!d->decode_buffer) {
+    tdata->decode_buffer = SDL_malloc(DECODE_FRAMES * spec->channels * sizeof(int32_t) * adata->decimation);
+    if (!tdata->decode_buffer) {
         goto failed;
     }
 
     // now open the memory buffers for serious processing.
-    d->ctx = (wavpack.WavpackOpenFileInputEx64 != NULL) ?
-                wavpack.WavpackOpenFileInputEx64(&WAVPACK_IoReader64, d->io, d->wvcio, err, OPEN_NORMALIZE|OPEN_TAGS|FLAGS_DSD, 0) :
-                wavpack.WavpackOpenFileInputEx(&WAVPACK_IoReader32, d->io, d->wvcio, err, OPEN_NORMALIZE|OPEN_TAGS, 0);
+    tdata->ctx = (wavpack.WavpackOpenFileInputEx64 != NULL) ?
+                wavpack.WavpackOpenFileInputEx64(&WAVPACK_IoReader64, tdata->io, tdata->wvcio, err, OPEN_NORMALIZE|OPEN_TAGS|FLAGS_DSD, 0) :
+                wavpack.WavpackOpenFileInputEx(&WAVPACK_IoReader32, tdata->io, tdata->wvcio, err, OPEN_NORMALIZE|OPEN_TAGS, 0);
 
-    if (!d->ctx) {
+    if (!tdata->ctx) {
         goto failed;
     }
 
-    d->payload = payload;
+    tdata->adata = adata;
 
-    *userdata = d;
+    *track_userdata = tdata;
 
     return true;
 
 failed:
-    if (d) {
-        SDL_assert(d->ctx == NULL);
-        SDL_free(d->decode_buffer);
-        SDL_CloseIO(d->wvcio);
-        SDL_CloseIO(d->io);
-        SDL_free(d);
+    if (tdata) {
+        SDL_assert(tdata->ctx == NULL);
+        SDL_free(tdata->decode_buffer);
+        SDL_CloseIO(tdata->wvcio);
+        SDL_CloseIO(tdata->io);
+        SDL_free(tdata);
     }
     return false;
 }
 
 bool SDLCALL WAVPACK_decode(void *userdata, SDL_AudioStream *stream)
 {
-    WAVPACK_UserData *d = (WAVPACK_UserData *) userdata;
-    const WAVPACK_AudioUserData *payload = d->payload;
+    WAVPACK_TrackData *tdata = (WAVPACK_TrackData *) userdata;
+    const WAVPACK_AudioData *adata = tdata->adata;
 
-    int amount = (int) wavpack.WavpackUnpackSamples(d->ctx, d->decode_buffer, DECODE_FRAMES * payload->decimation);
+    int amount = (int) wavpack.WavpackUnpackSamples(tdata->ctx, tdata->decode_buffer, DECODE_FRAMES * adata->decimation);
     #ifdef MUSIC_WAVPACK_DSD
-    if (amount && d->decimation_ctx) {
-        amount = decimation_run(d->decimation_ctx, d->decode_buffer, amount);
+    if (amount && tdata->decimation_ctx) {
+        amount = decimation_run(tdata->decimation_ctx, tdata->decode_buffer, amount);
     }
     #endif
 
@@ -549,27 +549,27 @@ bool SDLCALL WAVPACK_decode(void *userdata, SDL_AudioStream *stream)
         return false;  // EOF.
     }
 
-    amount *= payload->channels;  // move from sample frames to samples.
+    amount *= adata->channels;  // move from sample frames to samples.
 
     // library returns the samples in 8, 16, 24, or 32 bit depth, but
     // always in an int32_t[] buffer, in signed host-endian format.
-    const SDL_AudioFormat format = payload->format;
+    const SDL_AudioFormat format = adata->format;
     if (format == SDL_AUDIO_S8) {
-        const Sint32 *src = (const Sint32 *) d->decode_buffer;
-        Sint8 *dst = (Sint8 *) d->decode_buffer;
+        const Sint32 *src = (const Sint32 *) tdata->decode_buffer;
+        Sint8 *dst = (Sint8 *) tdata->decode_buffer;
         for (int i = 0; i < amount; i++) {
             dst[i] = (Sint8) src[i];  // data is 8-bit audio in an int32 array, shrink out unused bits in-place.
         }
     } else if (format == SDL_AUDIO_S16) {
-        const Sint32 *src = (const Sint32 *) d->decode_buffer;
-        Sint16 *dst = (Sint16 *) d->decode_buffer;
+        const Sint32 *src = (const Sint32 *) tdata->decode_buffer;
+        Sint16 *dst = (Sint16 *) tdata->decode_buffer;
         for (int i = 0; i < amount; i++) {
             dst[i] = (Sint16) src[i];  // data is 16-bit audio in an int32 array, shrink out unused bits in-place.
         }
-    } else if (payload->bps == 24) {
+    } else if (adata->bps == 24) {
         SDL_assert(format == SDL_AUDIO_S32);
-        const Sint32 *src = (const Sint32 *) d->decode_buffer;
-        Sint32 *dst = (Sint32 *) d->decode_buffer;
+        const Sint32 *src = (const Sint32 *) tdata->decode_buffer;
+        Sint32 *dst = (Sint32 *) tdata->decode_buffer;
         for (int i = 0; i < amount; i++) {
             dst[i] = src[i] << 8;  // data is 24-bit audio in an int32 array, slide bits over so most significant bits scale up to full 32-bit range.
         }
@@ -577,18 +577,18 @@ bool SDLCALL WAVPACK_decode(void *userdata, SDL_AudioStream *stream)
         SDL_assert((format == SDL_AUDIO_F32) || (format == SDL_AUDIO_S32));  // these just copy through as-is.
     }
 
-    SDL_PutAudioStreamData(stream, d->decode_buffer, amount * SDL_AUDIO_BYTESIZE(payload->format));
+    SDL_PutAudioStreamData(stream, tdata->decode_buffer, amount * SDL_AUDIO_BYTESIZE(adata->format));
     return true;
 }
 
 bool SDLCALL WAVPACK_seek(void *userdata, Uint64 frame)
 {
-    WAVPACK_UserData *d = (WAVPACK_UserData *) userdata;
+    WAVPACK_TrackData *tdata = (WAVPACK_TrackData *) userdata;
     const int success = (wavpack.WavpackSeekSample64 != NULL) ?
-                            wavpack.WavpackSeekSample64(d->ctx, frame) :
-                            wavpack.WavpackSeekSample(d->ctx, (uint32_t) frame);
+                            wavpack.WavpackSeekSample64(tdata->ctx, frame) :
+                            wavpack.WavpackSeekSample(tdata->ctx, (uint32_t) frame);
     if (!success) {
-        return SDL_SetError("%s", wavpack.WavpackGetErrorMessage(d->ctx));
+        return SDL_SetError("%s", wavpack.WavpackGetErrorMessage(tdata->ctx));
     }
 
     #ifdef MUSIC_WAVPACK_DSD
@@ -602,25 +602,25 @@ bool SDLCALL WAVPACK_seek(void *userdata, Uint64 frame)
 
 void SDLCALL WAVPACK_quit_track(void *userdata)
 {
-    WAVPACK_UserData *d = (WAVPACK_UserData *) userdata;
+    WAVPACK_TrackData *tdata = (WAVPACK_TrackData *) userdata;
 
     #ifdef MUSIC_WAVPACK_DSD
-    SDL_free(d->decimation_ctx);
+    SDL_free(tdata->decimation_ctx);
     #endif
 
-    wavpack.WavpackCloseFile(d->ctx);
-    SDL_CloseIO(d->io);
-    SDL_CloseIO(d->wvcio);
-    SDL_free(d->decode_buffer);
-    SDL_free(d);
+    wavpack.WavpackCloseFile(tdata->ctx);
+    SDL_CloseIO(tdata->io);
+    SDL_CloseIO(tdata->wvcio);
+    SDL_free(tdata->decode_buffer);
+    SDL_free(tdata);
 }
 
 void SDLCALL WAVPACK_quit_audio(void *audio_userdata)
 {
-    WAVPACK_AudioUserData *d = (WAVPACK_AudioUserData *) audio_userdata;
-    SDL_free((void *) d->data);
-    SDL_free((void *) d->wvcdata);
-    SDL_free(d);
+    WAVPACK_AudioData *tdata = (WAVPACK_AudioData *) audio_userdata;
+    SDL_free((void *) tdata->data);
+    SDL_free((void *) tdata->wvcdata);
+    SDL_free(tdata);
 }
 
 MIX_Decoder MIX_Decoder_WAVPACK = {

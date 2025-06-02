@@ -102,7 +102,7 @@ static bool SetStbVorbisError(const char *function, int error)
     return SDL_SetError("%s: unknown error %d\n", function, error);
 }
 
-typedef struct STBVORBIS_AudioUserData
+typedef struct STBVORBIS_AudioData
 {
     const Uint8 *data;
     size_t datalen;
@@ -110,14 +110,14 @@ typedef struct STBVORBIS_AudioUserData
     Sint64 loop_start;
     Sint64 loop_end;
     Sint64 loop_len;
-} STBVORBIS_AudioUserData;
+} STBVORBIS_AudioData;
 
-typedef struct STBVORBIS_UserData
+typedef struct STBVORBIS_TrackData
 {
-    const STBVORBIS_AudioUserData *payload;
+    const STBVORBIS_AudioData *adata;
     stb_vorbis *vorbis;
     Uint32 skip_samples;
-} STBVORBIS_UserData;
+} STBVORBIS_TrackData;
 
 
 static bool SDLCALL STBVORBIS_init(void)
@@ -155,21 +155,21 @@ static bool SDLCALL STBVORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, 
         return false;
     }
 
-    STBVORBIS_AudioUserData *payload = (STBVORBIS_AudioUserData *) SDL_calloc(1, sizeof (*payload));
-    if (!payload) {
+    STBVORBIS_AudioData *adata = (STBVORBIS_AudioData *) SDL_calloc(1, sizeof (*adata));
+    if (!adata) {
         SDL_free(data);
         return false;
     }
 
-    payload->data = data;
-    payload->datalen = datalen;
+    adata->data = data;
+    adata->datalen = datalen;
 
     // now open the memory buffer for serious processing.
     int error = 0;
     stb_vorbis *vorbis = stb_vorbis_open_memory((const unsigned char *) data, (int) datalen, &error, NULL);
     if (!vorbis) {
         SDL_free(data);
-        SDL_free(payload);
+        SDL_free(adata);
         return SetStbVorbisError("stb_vorbis_open_memory", error);
     }
 
@@ -179,44 +179,44 @@ static bool SDLCALL STBVORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, 
     spec->freq = vi.sample_rate;
 
     const stb_vorbis_comment vc = stb_vorbis_get_comment(vorbis);
-    MIX_ParseOggComments(props, spec->freq, vc.vendor, (const char * const *) vc.comment_list, vc.comment_list_length, &payload->loop_start, &payload->loop_end, &payload->loop_len);
+    MIX_ParseOggComments(props, spec->freq, vc.vendor, (const char * const *) vc.comment_list, vc.comment_list_length, &adata->loop_start, &adata->loop_end, &adata->loop_len);
 
     const Sint64 full_length = (Sint64) stb_vorbis_stream_length_in_samples(vorbis);
-    payload->loop = ((payload->loop_end > 0) && (payload->loop_end <= full_length) && (payload->loop_start < payload->loop_end));
+    adata->loop = ((adata->loop_end > 0) && (adata->loop_end <= full_length) && (adata->loop_start < adata->loop_end));
     stb_vorbis_close(vorbis);  // done with this instance. Tracks will maintain their own stb_vorbis object.
 
-    *duration_frames = payload->loop ? MIX_DURATION_INFINITE : full_length;  // if looping, stream is infinite.
-    *audio_userdata = payload;
+    *duration_frames = adata->loop ? MIX_DURATION_INFINITE : full_length;  // if looping, stream is infinite.
+    *audio_userdata = adata;
 
     return true;
 }
 
-bool SDLCALL STBVORBIS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+bool SDLCALL STBVORBIS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
-    STBVORBIS_UserData *d = (STBVORBIS_UserData *) SDL_calloc(1, sizeof (*d));
-    if (!d) {
+    STBVORBIS_TrackData *tdata = (STBVORBIS_TrackData *) SDL_calloc(1, sizeof (*tdata));
+    if (!tdata) {
         return false;
     }
 
-    const STBVORBIS_AudioUserData *payload = (const STBVORBIS_AudioUserData *) audio_userdata;
+    const STBVORBIS_AudioData *adata = (const STBVORBIS_AudioData *) audio_userdata;
 
     int error = 0;
-    d->vorbis = stb_vorbis_open_memory((const unsigned char *) payload->data, (int) payload->datalen, &error, NULL);
-    if (!d->vorbis) {
-        SDL_free(d);
+    tdata->vorbis = stb_vorbis_open_memory((const unsigned char *) adata->data, (int) adata->datalen, &error, NULL);
+    if (!tdata->vorbis) {
+        SDL_free(tdata);
         return SetStbVorbisError("stb_vorbis_open_memory", error);
     }
 
-    d->payload = payload;
+    tdata->adata = adata;
 
-    *userdata = d;
+    *track_userdata = tdata;
 
     return true;
 }
 
 bool SDLCALL STBVORBIS_decode(void *userdata, SDL_AudioStream *stream)
 {
-    STBVORBIS_UserData *d = (STBVORBIS_UserData *) userdata;
+    STBVORBIS_TrackData *tdata = (STBVORBIS_TrackData *) userdata;
 
     // !!! FIXME: handle looping.
 
@@ -230,21 +230,21 @@ bool SDLCALL STBVORBIS_decode(void *userdata, SDL_AudioStream *stream)
 
     float **pcm_channels = NULL;
     int num_channels = 0;
-    const int amount = stb_vorbis_get_frame_float(d->vorbis, &num_channels, &pcm_channels);
+    const int amount = stb_vorbis_get_frame_float(tdata->vorbis, &num_channels, &pcm_channels);
     if (amount <= 0) {
         return false;  // EOF
     }
 
     // did we just seek and need to throw away some samples at the start of the frame to reach the exact seek point?
     float *outputs[8];
-    if (d->skip_samples) {
-        const Uint32 skip = d->skip_samples;
+    if (tdata->skip_samples) {
+        const Uint32 skip = tdata->skip_samples;
         SDL_assert(num_channels <= SDL_arraysize(outputs));
         for (int i = 0; i < num_channels; i++) {
             outputs[i] = pcm_channels[i] + skip;
         }
         pcm_channels = outputs;
-        d->skip_samples = 0;
+        tdata->skip_samples = 0;
     }
 
     SDL_PutAudioStreamPlanarData(stream, (const void * const *) pcm_channels, num_channels, amount);
@@ -254,28 +254,28 @@ bool SDLCALL STBVORBIS_decode(void *userdata, SDL_AudioStream *stream)
 
 bool SDLCALL STBVORBIS_seek(void *userdata, Uint64 frame)
 {
-    STBVORBIS_UserData *d = (STBVORBIS_UserData *) userdata;
-    const int rc = stb_vorbis_seek_frame(d->vorbis, (unsigned int) frame);
+    STBVORBIS_TrackData *tdata = (STBVORBIS_TrackData *) userdata;
+    const int rc = stb_vorbis_seek_frame(tdata->vorbis, (unsigned int) frame);
     if (!rc) {
-        return SetStbVorbisError("stb_vorbis_seek", stb_vorbis_get_error(d->vorbis));
+        return SetStbVorbisError("stb_vorbis_seek", stb_vorbis_get_error(tdata->vorbis));
     }
 
-    d->skip_samples = (Uint32) (frame - ((Uint64) d->vorbis->current_loc));
+    tdata->skip_samples = (Uint32) (frame - ((Uint64) tdata->vorbis->current_loc));
     return true;
 }
 
 void SDLCALL STBVORBIS_quit_track(void *userdata)
 {
-    STBVORBIS_UserData *d = (STBVORBIS_UserData *) userdata;
-    stb_vorbis_close(d->vorbis);
-    SDL_free(d);
+    STBVORBIS_TrackData *tdata = (STBVORBIS_TrackData *) userdata;
+    stb_vorbis_close(tdata->vorbis);
+    SDL_free(tdata);
 }
 
 void SDLCALL STBVORBIS_quit_audio(void *audio_userdata)
 {
-    STBVORBIS_AudioUserData *d = (STBVORBIS_AudioUserData *) audio_userdata;
-    SDL_free((void *) d->data);
-    SDL_free(d);
+    STBVORBIS_AudioData *tdata = (STBVORBIS_AudioData *) audio_userdata;
+    SDL_free((void *) tdata->data);
+    SDL_free(tdata);
 }
 
 MIX_Decoder MIX_Decoder_STBVORBIS = {

@@ -68,22 +68,22 @@
 #include "SDL_mixer_loader.h"
 
 
-typedef struct FLUIDSYNTH_AudioUserData
+typedef struct FLUIDSYNTH_AudioData
 {
     const Uint8 *data;
     size_t datalen;
     const Uint8 *sfdata;
     size_t sfdatalen;
-} FLUIDSYNTH_AudioUserData;
+} FLUIDSYNTH_AudioData;
 
-typedef struct FLUIDSYNTH_UserData
+typedef struct FLUIDSYNTH_TrackData
 {
-    const FLUIDSYNTH_AudioUserData *payload;
+    const FLUIDSYNTH_AudioData *adata;
     fluid_synth_t *synth;
     fluid_settings_t *settings;
     fluid_player_t *player;
     int freq;
-} FLUIDSYNTH_UserData;
+} FLUIDSYNTH_TrackData;
 
 
 static bool SDLCALL FLUIDSYNTH_init(void)
@@ -163,24 +163,24 @@ static bool SDLCALL FLUIDSYNTH_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec,
         }
     }
 
-    FLUIDSYNTH_AudioUserData *payload = (FLUIDSYNTH_AudioUserData *) SDL_calloc(1, sizeof (*payload));
-    if (!payload) {
+    FLUIDSYNTH_AudioData *adata = (FLUIDSYNTH_AudioData *) SDL_calloc(1, sizeof (*adata));
+    if (!adata) {
         SDL_free(sfdata);
         SDL_free(data);
         return false;
     }
 
-    payload->data = data;
-    payload->datalen = datalen;
-    payload->sfdata = sfdata;
-    payload->sfdatalen = sfdatalen;
+    adata->data = data;
+    adata->datalen = datalen;
+    adata->sfdata = sfdata;
+    adata->sfdatalen = sfdatalen;
 
     spec->format = SDL_AUDIO_F32;
     spec->channels = 2;
     // Use the device's current sample rate, already set in spec->freq
 
     *duration_frames = -1;  // !!! FIXME: fluid_player_get_total_ticks can give us a time duration, but we don't have a player until we set up the track later.
-    *audio_userdata = payload;
+    *audio_userdata = adata;
 
     return true;
 }
@@ -224,99 +224,99 @@ static fluid_long_long_t SoundFontTell(void *handle)
 }
 
 
-bool SDLCALL FLUIDSYNTH_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+bool SDLCALL FLUIDSYNTH_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
-    FLUIDSYNTH_UserData *d = (FLUIDSYNTH_UserData *) SDL_calloc(1, sizeof (*d));
-    if (!d) {
+    FLUIDSYNTH_TrackData *tdata = (FLUIDSYNTH_TrackData *) SDL_calloc(1, sizeof (*tdata));
+    if (!tdata) {
         return false;
     }
 
-    const FLUIDSYNTH_AudioUserData *payload = (const FLUIDSYNTH_AudioUserData *) audio_userdata;
+    const FLUIDSYNTH_AudioData *adata = (const FLUIDSYNTH_AudioData *) audio_userdata;
     double samplerate = 0.0;
 
-    d->settings = fluidsynth.new_fluid_settings();
-    if (!d->settings) {
+    tdata->settings = fluidsynth.new_fluid_settings();
+    if (!tdata->settings) {
         SDL_SetError("Failed to create FluidSynth settings");
         goto failed;
     }
 
-    //fluidsynth.fluid_settings_setint(d->settings, "synth.cpu-cores", 2);
-    fluidsynth.fluid_settings_setnum(d->settings, "synth.gain", 1.0);
-    fluidsynth.fluid_settings_setnum(d->settings, "synth.sample-rate", (double) spec->freq);
-    fluidsynth.fluid_settings_getnum(d->settings, "synth.sample-rate", &samplerate);
+    //fluidsynth.fluid_settings_setint(tdata->settings, "synth.cpu-cores", 2);
+    fluidsynth.fluid_settings_setnum(tdata->settings, "synth.gain", 1.0);
+    fluidsynth.fluid_settings_setnum(tdata->settings, "synth.sample-rate", (double) spec->freq);
+    fluidsynth.fluid_settings_getnum(tdata->settings, "synth.sample-rate", &samplerate);
 
-    d->synth = fluidsynth.new_fluid_synth(d->settings);
-    if (!d->synth) {
+    tdata->synth = fluidsynth.new_fluid_synth(tdata->settings);
+    if (!tdata->synth) {
         SDL_SetError("Failed to create FluidSynth synthesizer");
         goto failed;
     }
 
-    if (payload->sfdata) {
-        fluid_sfloader_t *sfloader = fluidsynth.new_fluid_defsfloader(d->settings);
+    if (adata->sfdata) {
+        fluid_sfloader_t *sfloader = fluidsynth.new_fluid_defsfloader(tdata->settings);
         if (!sfloader) {
             SDL_SetError("Failed to create FluidSynth sfloader");
             goto failed;
         }
 
         char fakefname[64];
-        SDL_snprintf(fakefname, sizeof (fakefname), "&FAKESFNAME&%p", SDL_IOFromConstMem(payload->sfdata, payload->sfdatalen));
+        SDL_snprintf(fakefname, sizeof (fakefname), "&FAKESFNAME&%p", SDL_IOFromConstMem(adata->sfdata, adata->sfdatalen));
         fluidsynth.fluid_sfloader_set_callbacks(sfloader, SoundFontOpen, SoundFontRead, SoundFontSeek, SoundFontTell, SoundFontClose);
-        fluidsynth.fluid_synth_add_sfloader(d->synth, sfloader);
-        if (fluidsynth.fluid_synth_sfload(d->synth, fakefname, 1) == FLUID_FAILED) {
+        fluidsynth.fluid_synth_add_sfloader(tdata->synth, sfloader);
+        if (fluidsynth.fluid_synth_sfload(tdata->synth, fakefname, 1) == FLUID_FAILED) {
             SDL_SetError("Failed to load FluidSynth soundfont");
             goto failed;
         }
     }
 
-    d->player = fluidsynth.new_fluid_player(d->synth);
-    if (!d->player) {
+    tdata->player = fluidsynth.new_fluid_player(tdata->synth);
+    if (!tdata->player) {
         SDL_SetError("Failed to create FluidSynth player");
         goto failed;
     }
 
-    if (fluidsynth.fluid_player_add_mem(d->player, payload->data, payload->datalen) != FLUID_OK) {
+    if (fluidsynth.fluid_player_add_mem(tdata->player, adata->data, adata->datalen) != FLUID_OK) {
         SDL_SetError("FluidSynth failed to load in-memory song");
         goto failed;
     }
 
-    if (fluidsynth.fluid_player_play(d->player) != FLUID_OK) {
+    if (fluidsynth.fluid_player_play(tdata->player) != FLUID_OK) {
         SDL_SetError("Failed to start FluidSynth player");
         goto failed;
     }
 
-    d->payload = payload;
-    d->freq = (int) samplerate;
+    tdata->adata = adata;
+    tdata->freq = (int) samplerate;
 
-    *userdata = d;
+    *track_userdata = tdata;
     return true;
 
 failed:
-    SDL_assert(d != NULL);
-    if (d->player) {
-        fluidsynth.fluid_player_stop(d->player);
-        fluidsynth.delete_fluid_player(d->player);
+    SDL_assert(tdata != NULL);
+    if (tdata->player) {
+        fluidsynth.fluid_player_stop(tdata->player);
+        fluidsynth.delete_fluid_player(tdata->player);
     }
-    if (d->synth) {
-        fluidsynth.delete_fluid_synth(d->synth);
+    if (tdata->synth) {
+        fluidsynth.delete_fluid_synth(tdata->synth);
     }
-    if (d->settings) {
-        fluidsynth.delete_fluid_settings(d->settings);
+    if (tdata->settings) {
+        fluidsynth.delete_fluid_settings(tdata->settings);
     }
-    SDL_free(d);
+    SDL_free(tdata);
 
     return false;
 }
 
 bool SDLCALL FLUIDSYNTH_decode(void *userdata, SDL_AudioStream *stream)
 {
-    FLUIDSYNTH_UserData *d = (FLUIDSYNTH_UserData *) userdata;
+    FLUIDSYNTH_TrackData *tdata = (FLUIDSYNTH_TrackData *) userdata;
 
-    if (fluidsynth.fluid_player_get_status(d->player) != FLUID_PLAYER_PLAYING) {
+    if (fluidsynth.fluid_player_get_status(tdata->player) != FLUID_PLAYER_PLAYING) {
         return false;
     }
 
     float samples[256];
-    if (fluidsynth.fluid_synth_write_float(d->synth, SDL_arraysize(samples) / 2, samples, 0, 2, samples, 1, 2) != FLUID_OK) {
+    if (fluidsynth.fluid_synth_write_float(tdata->synth, SDL_arraysize(samples) / 2, samples, 0, 2, samples, 1, 2) != FLUID_OK) {
         return false;  // maybe EOF...?
     }
 
@@ -331,30 +331,30 @@ bool SDLCALL FLUIDSYNTH_seek(void *userdata, Uint64 frame)
 #if (FLUIDSYNTH_VERSION_MAJOR < 2)
     return SDL_Unsupported();
 #else
-    FLUIDSYNTH_UserData *d = (FLUIDSYNTH_UserData *) userdata;
-    const int ticks = (int) MIX_FramesToMS(d->freq, frame);
+    FLUIDSYNTH_TrackData *tdata = (FLUIDSYNTH_TrackData *) userdata;
+    const int ticks = (int) MIX_FramesToMS(tdata->freq, frame);
 
     // !!! FIXME: docs say this will fail if a seek was requested and then a second seek happens before we play more of the midi file, since the first seek will still be in progress.
-    return (fluidsynth.fluid_player_seek(d->player, ticks) == FLUID_OK);
+    return (fluidsynth.fluid_player_seek(tdata->player, ticks) == FLUID_OK);
 #endif
 }
 
 void SDLCALL FLUIDSYNTH_quit_track(void *userdata)
 {
-    FLUIDSYNTH_UserData *d = (FLUIDSYNTH_UserData *) userdata;
-    fluidsynth.fluid_player_stop(d->player);
-    fluidsynth.delete_fluid_player(d->player);
-    fluidsynth.delete_fluid_synth(d->synth);
-    fluidsynth.delete_fluid_settings(d->settings);
-    SDL_free(d);
+    FLUIDSYNTH_TrackData *tdata = (FLUIDSYNTH_TrackData *) userdata;
+    fluidsynth.fluid_player_stop(tdata->player);
+    fluidsynth.delete_fluid_player(tdata->player);
+    fluidsynth.delete_fluid_synth(tdata->synth);
+    fluidsynth.delete_fluid_settings(tdata->settings);
+    SDL_free(tdata);
 }
 
 void SDLCALL FLUIDSYNTH_quit_audio(void *audio_userdata)
 {
-    FLUIDSYNTH_AudioUserData *d = (FLUIDSYNTH_AudioUserData *) audio_userdata;
-    SDL_free((void *) d->sfdata);
-    SDL_free((void *) d->data);
-    SDL_free(d);
+    FLUIDSYNTH_AudioData *tdata = (FLUIDSYNTH_AudioData *) audio_userdata;
+    SDL_free((void *) tdata->sfdata);
+    SDL_free((void *) tdata->data);
+    SDL_free(tdata);
 }
 
 MIX_Decoder MIX_Decoder_FLUIDSYNTH = {

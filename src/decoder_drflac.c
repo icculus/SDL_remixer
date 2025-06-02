@@ -44,7 +44,7 @@
 
 
 
-typedef struct DRFLAC_AudioUserData
+typedef struct DRFLAC_AudioData
 {
     void *buffer;
     size_t buflen;
@@ -53,13 +53,13 @@ typedef struct DRFLAC_AudioUserData
     Sint64 loop_start;
     Sint64 loop_end;
     Sint64 loop_len;
-} DRFLAC_AudioUserData;
+} DRFLAC_AudioData;
 
-typedef struct DRFLAC_UserData
+typedef struct DRFLAC_TrackData
 {
-    const DRFLAC_AudioUserData *payload;
+    const DRFLAC_AudioData *adata;
     drflac *decoder;
-} DRFLAC_UserData;
+} DRFLAC_TrackData;
 
 
 // the i/o callbacks are only used for initial open, so it can read as little
@@ -141,29 +141,29 @@ static bool SDLCALL DRFLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
         return false;
     }
 
-    DRFLAC_AudioUserData *payload = (DRFLAC_AudioUserData *) SDL_calloc(1, sizeof(*payload));
-    if (!payload) {
+    DRFLAC_AudioData *adata = (DRFLAC_AudioData *) SDL_calloc(1, sizeof(*adata));
+    if (!adata) {
         return false;
     }
 
-    payload->buffer = SDL_LoadFile_IO(io, &payload->buflen, false);
-    if (!payload->buffer) {
-        SDL_free(payload);
+    adata->buffer = SDL_LoadFile_IO(io, &adata->buflen, false);
+    if (!adata->buffer) {
+        SDL_free(adata);
         return false;
     }
 
     DRFLAC_Metadata metadata;
     SDL_zero(metadata);
 
-    decoder = drflac_open_memory_with_metadata(payload->buffer, payload->buflen, DRFLAC_OnMetadata, &metadata, NULL);
+    decoder = drflac_open_memory_with_metadata(adata->buffer, adata->buflen, DRFLAC_OnMetadata, &metadata, NULL);
     if (!decoder) {
         FreeMetadata(&metadata);
-        SDL_free(payload->buffer);
-        SDL_free(payload);
+        SDL_free(adata->buffer);
+        SDL_free(adata);
         return false;
     }
 
-    MIX_ParseOggComments(props, (int) decoder->sampleRate, metadata.vendor, (const char * const *) metadata.comments, metadata.num_comments, &payload->loop_start, &payload->loop_end, &payload->loop_len);
+    MIX_ParseOggComments(props, (int) decoder->sampleRate, metadata.vendor, (const char * const *) metadata.comments, metadata.num_comments, &adata->loop_start, &adata->loop_end, &adata->loop_len);
     FreeMetadata(&metadata);
 
     spec->format = SDL_AUDIO_F32;
@@ -172,46 +172,46 @@ static bool SDLCALL DRFLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
 
     *duration_frames = (decoder->totalPCMFrameCount == 0) ? MIX_DURATION_UNKNOWN : (Sint64) decoder->totalPCMFrameCount;
 
-    payload->loop = ((payload->loop_end > 0) && (payload->loop_end <= *duration_frames) && (payload->loop_start < payload->loop_end));
-    if (payload->loop) {
+    adata->loop = ((adata->loop_end > 0) && (adata->loop_end <= *duration_frames) && (adata->loop_start < adata->loop_end));
+    if (adata->loop) {
         *duration_frames = MIX_DURATION_INFINITE;  // if looping, stream is infinite.
     }
 
     drflac_close(decoder);
 
-    payload->framesize = SDL_AUDIO_FRAMESIZE(*spec);
+    adata->framesize = SDL_AUDIO_FRAMESIZE(*spec);
 
-    *audio_userdata = payload;
+    *audio_userdata = adata;
 
     return true;
 }
 
-static bool SDLCALL DRFLAC_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+static bool SDLCALL DRFLAC_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
-    const DRFLAC_AudioUserData *payload = (const DRFLAC_AudioUserData *) audio_userdata;
-    DRFLAC_UserData *d = (DRFLAC_UserData *) SDL_calloc(1, sizeof (*d));
-    if (!d) {
+    const DRFLAC_AudioData *adata = (const DRFLAC_AudioData *) audio_userdata;
+    DRFLAC_TrackData *tdata = (DRFLAC_TrackData *) SDL_calloc(1, sizeof (*tdata));
+    if (!tdata) {
         return false;
     }
 
-    d->decoder = drflac_open_memory(payload->buffer, payload->buflen, NULL);
-    if (!d->decoder) {
-        SDL_free(d);
+    tdata->decoder = drflac_open_memory(adata->buffer, adata->buflen, NULL);
+    if (!tdata->decoder) {
+        SDL_free(tdata);
         return false;
     }
 
-    d->payload = payload;
-    *userdata = d;
+    tdata->adata = adata;
+    *track_userdata = tdata;
 
     return true;
 }
 
 static bool SDLCALL DRFLAC_decode(void *userdata, SDL_AudioStream *stream)
 {
-    DRFLAC_UserData *d = (DRFLAC_UserData *) userdata;
-    const int framesize = d->payload->framesize;
+    DRFLAC_TrackData *tdata = (DRFLAC_TrackData *) userdata;
+    const int framesize = tdata->adata->framesize;
     float samples[256];
-    const drflac_uint64 rc = drflac_read_pcm_frames_f32(d->decoder, sizeof (samples) / framesize, samples);
+    const drflac_uint64 rc = drflac_read_pcm_frames_f32(tdata->decoder, sizeof (samples) / framesize, samples);
     if (!rc) {
         return false;  // done decoding.
     }
@@ -221,22 +221,22 @@ static bool SDLCALL DRFLAC_decode(void *userdata, SDL_AudioStream *stream)
 
 static bool SDLCALL DRFLAC_seek(void *userdata, Uint64 frame)
 {
-    DRFLAC_UserData *d = (DRFLAC_UserData *) userdata;
-    return !!drflac_seek_to_pcm_frame(d->decoder, (drflac_uint64) frame);
+    DRFLAC_TrackData *tdata = (DRFLAC_TrackData *) userdata;
+    return !!drflac_seek_to_pcm_frame(tdata->decoder, (drflac_uint64) frame);
 }
 
 static void SDLCALL DRFLAC_quit_track(void *userdata)
 {
-    DRFLAC_UserData *d = (DRFLAC_UserData *) userdata;
-    drflac_close(d->decoder);
-    SDL_free(d);
+    DRFLAC_TrackData *tdata = (DRFLAC_TrackData *) userdata;
+    drflac_close(tdata->decoder);
+    SDL_free(tdata);
 }
 
 static void SDLCALL DRFLAC_quit_audio(void *audio_userdata)
 {
-    DRFLAC_AudioUserData *payload = (DRFLAC_AudioUserData *) audio_userdata;
-    SDL_free(payload->buffer);
-    SDL_free(payload);
+    DRFLAC_AudioData *adata = (DRFLAC_AudioData *) audio_userdata;
+    SDL_free(adata->buffer);
+    SDL_free(adata);
 }
 
 MIX_Decoder MIX_Decoder_DRFLAC = {
