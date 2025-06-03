@@ -159,9 +159,9 @@ bool SDLCALL TIMIDITY_init_track(void *audio_userdata, const SDL_AudioSpec *spec
     return true;
 }
 
-bool SDLCALL TIMIDITY_decode(void *userdata, SDL_AudioStream *stream)
+bool SDLCALL TIMIDITY_decode(void *track_userdata, SDL_AudioStream *stream)
 {
-    TIMIDITY_TrackData *tdata = (TIMIDITY_TrackData *) userdata;
+    TIMIDITY_TrackData *tdata = (TIMIDITY_TrackData *) track_userdata;
     //Sint32 samples[256];  // !!! FIXME: there's a hardcoded thing about buffer_size in our copy of timidity that needs to be fixed; it's hardcoded at the moment, so we use tdata->samples.
     const int amount = Timidity_PlaySome(tdata->song, tdata->samples, sizeof (tdata->samples));
     if (amount <= 0) {
@@ -174,17 +174,17 @@ bool SDLCALL TIMIDITY_decode(void *userdata, SDL_AudioStream *stream)
     return true;
 }
 
-bool SDLCALL TIMIDITY_seek(void *userdata, Uint64 frame)
+bool SDLCALL TIMIDITY_seek(void *track_userdata, Uint64 frame)
 {
-    TIMIDITY_TrackData *tdata = (TIMIDITY_TrackData *) userdata;
+    TIMIDITY_TrackData *tdata = (TIMIDITY_TrackData *) track_userdata;
     const Uint32 ticks = (Uint32) MIX_FramesToMS(tdata->freq, frame);
     Timidity_Seek(tdata->song, ticks);  // !!! FIXME: this returns void, what happens if we seek past EOF?
     return true;
 }
 
-void SDLCALL TIMIDITY_quit_track(void *userdata)
+void SDLCALL TIMIDITY_quit_track(void *track_userdata)
 {
-    TIMIDITY_TrackData *tdata = (TIMIDITY_TrackData *) userdata;
+    TIMIDITY_TrackData *tdata = (TIMIDITY_TrackData *) track_userdata;
     Timidity_Stop(tdata->song);
     Timidity_FreeSong(tdata->song);
     SDL_free(tdata);

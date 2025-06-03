@@ -82,10 +82,10 @@ typedef struct MIX_Decoder
     const char *name;
     bool (SDLCALL *init)(void);   // initialize the decoder (load external libraries, etc).
     bool (SDLCALL *init_audio)(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata);  // see if it's a supported format, init spec, set metadata in props, allocate static userdata and payload.
-    bool (SDLCALL *init_track)(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata);  // init decoder instance data for a single track.
-    bool (SDLCALL *decode)(void *userdata, SDL_AudioStream *stream);
-    bool (SDLCALL *seek)(void *userdata, Uint64 frame);
-    void (SDLCALL *quit_track)(void *userdata);
+    bool (SDLCALL *init_track)(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata);  // init decoder instance data for a single track.
+    bool (SDLCALL *decode)(void *track_userdata, SDL_AudioStream *stream);
+    bool (SDLCALL *seek)(void *track_userdata, Uint64 frame);
+    void (SDLCALL *quit_track)(void *track_userdata);
     void (SDLCALL *quit_audio)(void *audio_userdata);
     void (SDLCALL *quit)(void);   // deinitialize the decoder (unload external libraries, etc).
 } MIX_Decoder;

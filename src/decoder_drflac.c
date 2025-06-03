@@ -206,9 +206,9 @@ static bool SDLCALL DRFLAC_init_track(void *audio_userdata, const SDL_AudioSpec 
     return true;
 }
 
-static bool SDLCALL DRFLAC_decode(void *userdata, SDL_AudioStream *stream)
+static bool SDLCALL DRFLAC_decode(void *track_userdata, SDL_AudioStream *stream)
 {
-    DRFLAC_TrackData *tdata = (DRFLAC_TrackData *) userdata;
+    DRFLAC_TrackData *tdata = (DRFLAC_TrackData *) track_userdata;
     const int framesize = tdata->adata->framesize;
     float samples[256];
     const drflac_uint64 rc = drflac_read_pcm_frames_f32(tdata->decoder, sizeof (samples) / framesize, samples);
@@ -219,15 +219,15 @@ static bool SDLCALL DRFLAC_decode(void *userdata, SDL_AudioStream *stream)
     return true;
 }
 
-static bool SDLCALL DRFLAC_seek(void *userdata, Uint64 frame)
+static bool SDLCALL DRFLAC_seek(void *track_userdata, Uint64 frame)
 {
-    DRFLAC_TrackData *tdata = (DRFLAC_TrackData *) userdata;
+    DRFLAC_TrackData *tdata = (DRFLAC_TrackData *) track_userdata;
     return !!drflac_seek_to_pcm_frame(tdata->decoder, (drflac_uint64) frame);
 }
 
-static void SDLCALL DRFLAC_quit_track(void *userdata)
+static void SDLCALL DRFLAC_quit_track(void *track_userdata)
 {
-    DRFLAC_TrackData *tdata = (DRFLAC_TrackData *) userdata;
+    DRFLAC_TrackData *tdata = (DRFLAC_TrackData *) track_userdata;
     drflac_close(tdata->decoder);
     SDL_free(tdata);
 }

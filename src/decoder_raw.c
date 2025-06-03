@@ -110,9 +110,9 @@ bool SDLCALL MIX_RAW_init_track(void *audio_userdata, const SDL_AudioSpec *spec,
     return true;
 }
 
-bool SDLCALL MIX_RAW_decode(void *userdata, SDL_AudioStream *stream)
+bool SDLCALL MIX_RAW_decode(void *track_userdata, SDL_AudioStream *stream)
 {
-    RAW_TrackData *tdata = (RAW_TrackData *) userdata;
+    RAW_TrackData *tdata = (RAW_TrackData *) track_userdata;
     const RAW_AudioData *adata = tdata->adata;
     const size_t remaining = adata->datalen - tdata->position;
     const size_t cpy = SDL_min(4096, remaining);
@@ -125,9 +125,9 @@ bool SDLCALL MIX_RAW_decode(void *userdata, SDL_AudioStream *stream)
     return true;
 }
 
-bool SDLCALL MIX_RAW_seek(void *userdata, Uint64 frame)
+bool SDLCALL MIX_RAW_seek(void *track_userdata, Uint64 frame)
 {
-    RAW_TrackData *tdata = (RAW_TrackData *) userdata;
+    RAW_TrackData *tdata = (RAW_TrackData *) track_userdata;
     const RAW_AudioData *adata = tdata->adata;
     if (frame > adata->total_frames) {
         return SDL_SetError("Seek past end of data");
@@ -136,9 +136,9 @@ bool SDLCALL MIX_RAW_seek(void *userdata, Uint64 frame)
     return true;
 }
 
-void SDLCALL MIX_RAW_quit_track(void *userdata)
+void SDLCALL MIX_RAW_quit_track(void *track_userdata)
 {
-    SDL_free(userdata);
+    SDL_free(track_userdata);
 }
 
 void SDLCALL MIX_RAW_quit_audio(void *audio_userdata)

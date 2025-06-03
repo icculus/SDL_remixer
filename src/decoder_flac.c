@@ -395,9 +395,9 @@ bool SDLCALL FLAC_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SD
     return true;
 }
 
-bool SDLCALL FLAC_decode(void *userdata, SDL_AudioStream *stream)
+bool SDLCALL FLAC_decode(void *track_userdata, SDL_AudioStream *stream)
 {
-    FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
+    FLAC_TrackData *tdata = (FLAC_TrackData *) track_userdata;
     tdata->stream = stream;
 
     if (!flac.FLAC__stream_decoder_process_single(tdata->decoder)) {  // write callback will fill in stream. Might fill 0 if it hit a metadata block, but the higher level loops to get what it needs.
@@ -409,9 +409,9 @@ bool SDLCALL FLAC_decode(void *userdata, SDL_AudioStream *stream)
     return true;
 }
 
-bool SDLCALL FLAC_seek(void *userdata, Uint64 frame)
+bool SDLCALL FLAC_seek(void *track_userdata, Uint64 frame)
 {
-    FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
+    FLAC_TrackData *tdata = (FLAC_TrackData *) track_userdata;
     if (!flac.FLAC__stream_decoder_seek_absolute(tdata->decoder, frame)) {
         if (flac.FLAC__stream_decoder_get_state(tdata->decoder) == FLAC__STREAM_DECODER_SEEK_ERROR) {
             flac.FLAC__stream_decoder_flush(tdata->decoder);
@@ -421,9 +421,9 @@ bool SDLCALL FLAC_seek(void *userdata, Uint64 frame)
     return true;
 }
 
-void SDLCALL FLAC_quit_track(void *userdata)
+void SDLCALL FLAC_quit_track(void *track_userdata)
 {
-    FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
+    FLAC_TrackData *tdata = (FLAC_TrackData *) track_userdata;
     tdata->stream = NULL;
     flac.FLAC__stream_decoder_finish(tdata->decoder);
     flac.FLAC__stream_decoder_delete(tdata->decoder);

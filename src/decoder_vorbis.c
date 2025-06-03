@@ -258,9 +258,9 @@ bool SDLCALL VORBIS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, 
     return true;
 }
 
-bool SDLCALL VORBIS_decode(void *userdata, SDL_AudioStream *stream)
+bool SDLCALL VORBIS_decode(void *track_userdata, SDL_AudioStream *stream)
 {
-    VORBIS_TrackData *tdata = (VORBIS_TrackData *) userdata;
+    VORBIS_TrackData *tdata = (VORBIS_TrackData *) track_userdata;
     //const VORBIS_AudioData *adata = tdata->adata;
     int bitstream = tdata->current_bitstream;
 
@@ -306,17 +306,17 @@ bool SDLCALL VORBIS_decode(void *userdata, SDL_AudioStream *stream)
     return true;  // had more data to decode.
 }
 
-bool SDLCALL VORBIS_seek(void *userdata, Uint64 frame)
+bool SDLCALL VORBIS_seek(void *track_userdata, Uint64 frame)
 {
-    VORBIS_TrackData *tdata = (VORBIS_TrackData *) userdata;
+    VORBIS_TrackData *tdata = (VORBIS_TrackData *) track_userdata;
     // !!! FIXME: I assume ov_raw_seek is faster if we're seeking to start, but I could be wrong.
     const int rc = (frame == 0) ? vorbis.ov_raw_seek(&tdata->vf, 0) : vorbis.ov_pcm_seek(&tdata->vf, (ogg_int64_t) frame);
     return (rc == 0) ? true : SetOggVorbisError("ov_pcm_seek", rc);
 }
 
-void SDLCALL VORBIS_quit_track(void *userdata)
+void SDLCALL VORBIS_quit_track(void *track_userdata)
 {
-    VORBIS_TrackData *tdata = (VORBIS_TrackData *) userdata;
+    VORBIS_TrackData *tdata = (VORBIS_TrackData *) track_userdata;
     vorbis.ov_clear(&tdata->vf);
     SDL_CloseIO(tdata->io);
     SDL_free(tdata);

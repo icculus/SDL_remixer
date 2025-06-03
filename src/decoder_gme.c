@@ -183,9 +183,9 @@ bool SDLCALL GME_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL
     return true;
 }
 
-bool SDLCALL GME_decode(void *userdata, SDL_AudioStream *stream)
+bool SDLCALL GME_decode(void *track_userdata, SDL_AudioStream *stream)
 {
-    GME_TrackData *tdata = (GME_TrackData *) userdata;
+    GME_TrackData *tdata = (GME_TrackData *) track_userdata;
     //const GME_AudioData *adata = tdata->adata;
 
     if (gme.gme_track_ended(tdata->emu)) {
@@ -203,16 +203,16 @@ bool SDLCALL GME_decode(void *userdata, SDL_AudioStream *stream)
     return true;  // had more data to decode.
 }
 
-bool SDLCALL GME_seek(void *userdata, Uint64 frame)
+bool SDLCALL GME_seek(void *track_userdata, Uint64 frame)
 {
-    GME_TrackData *tdata = (GME_TrackData *) userdata;
+    GME_TrackData *tdata = (GME_TrackData *) track_userdata;
     gme_err_t err = gme.gme_seek_samples(tdata->emu, (int) frame);
     return err ? SDL_SetError("gme_seek_samples failed: %s", err) : true;
 }
 
-void SDLCALL GME_quit_track(void *userdata)
+void SDLCALL GME_quit_track(void *track_userdata)
 {
-    GME_TrackData *tdata = (GME_TrackData *) userdata;
+    GME_TrackData *tdata = (GME_TrackData *) track_userdata;
     gme.gme_delete(tdata->emu);
     SDL_free(tdata);
 }

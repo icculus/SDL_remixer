@@ -88,9 +88,9 @@ static bool SDLCALL SINEWAVE_init_track(void *audio_userdata, const SDL_AudioSpe
     return true;
 }
 
-static bool SDLCALL SINEWAVE_decode(void *userdata, SDL_AudioStream *stream)
+static bool SDLCALL SINEWAVE_decode(void *track_userdata, SDL_AudioStream *stream)
 {
-    SINEWAVE_TrackData *tdata = (SINEWAVE_TrackData *) userdata;
+    SINEWAVE_TrackData *tdata = (SINEWAVE_TrackData *) track_userdata;
     const SINEWAVE_AudioData *adata = tdata->adata;
     const int sample_rate = adata->sample_rate;
     const float fsample_rate = (float) sample_rate;
@@ -113,17 +113,17 @@ static bool SDLCALL SINEWAVE_decode(void *userdata, SDL_AudioStream *stream)
     return true;   // infinite data
 }
 
-static bool SDLCALL SINEWAVE_seek(void *userdata, Uint64 frame)
+static bool SDLCALL SINEWAVE_seek(void *track_userdata, Uint64 frame)
 {
-    SINEWAVE_TrackData *tdata = (SINEWAVE_TrackData *) userdata;
+    SINEWAVE_TrackData *tdata = (SINEWAVE_TrackData *) track_userdata;
     const SINEWAVE_AudioData *adata = tdata->adata;
     tdata->current_sine_sample = frame % adata->sample_rate;
     return true;
 }
 
-static void SDLCALL SINEWAVE_quit_track(void *userdata)
+static void SDLCALL SINEWAVE_quit_track(void *track_userdata)
 {
-    SDL_free(userdata);
+    SDL_free(track_userdata);
 }
 
 static void SDLCALL SINEWAVE_quit_audio(void *audio_userdata)

@@ -533,9 +533,9 @@ failed:
     return false;
 }
 
-bool SDLCALL WAVPACK_decode(void *userdata, SDL_AudioStream *stream)
+bool SDLCALL WAVPACK_decode(void *track_userdata, SDL_AudioStream *stream)
 {
-    WAVPACK_TrackData *tdata = (WAVPACK_TrackData *) userdata;
+    WAVPACK_TrackData *tdata = (WAVPACK_TrackData *) track_userdata;
     const WAVPACK_AudioData *adata = tdata->adata;
 
     int amount = (int) wavpack.WavpackUnpackSamples(tdata->ctx, tdata->decode_buffer, DECODE_FRAMES * adata->decimation);
@@ -581,9 +581,9 @@ bool SDLCALL WAVPACK_decode(void *userdata, SDL_AudioStream *stream)
     return true;
 }
 
-bool SDLCALL WAVPACK_seek(void *userdata, Uint64 frame)
+bool SDLCALL WAVPACK_seek(void *track_userdata, Uint64 frame)
 {
-    WAVPACK_TrackData *tdata = (WAVPACK_TrackData *) userdata;
+    WAVPACK_TrackData *tdata = (WAVPACK_TrackData *) track_userdata;
     const int success = (wavpack.WavpackSeekSample64 != NULL) ?
                             wavpack.WavpackSeekSample64(tdata->ctx, frame) :
                             wavpack.WavpackSeekSample(tdata->ctx, (uint32_t) frame);
@@ -600,9 +600,9 @@ bool SDLCALL WAVPACK_seek(void *userdata, Uint64 frame)
     return true;
 }
 
-void SDLCALL WAVPACK_quit_track(void *userdata)
+void SDLCALL WAVPACK_quit_track(void *track_userdata)
 {
-    WAVPACK_TrackData *tdata = (WAVPACK_TrackData *) userdata;
+    WAVPACK_TrackData *tdata = (WAVPACK_TrackData *) track_userdata;
 
     #ifdef MUSIC_WAVPACK_DSD
     SDL_free(tdata->decimation_ctx);

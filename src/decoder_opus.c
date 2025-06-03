@@ -239,9 +239,9 @@ bool SDLCALL OPUS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SD
     return true;
 }
 
-bool SDLCALL OPUS_decode(void *userdata, SDL_AudioStream *stream)
+bool SDLCALL OPUS_decode(void *track_userdata, SDL_AudioStream *stream)
 {
-    OPUS_TrackData *tdata = (OPUS_TrackData *) userdata;
+    OPUS_TrackData *tdata = (OPUS_TrackData *) track_userdata;
     int bitstream = tdata->current_bitstream;
     float samples[256];
 
@@ -272,17 +272,17 @@ bool SDLCALL OPUS_decode(void *userdata, SDL_AudioStream *stream)
     return (amount > 0);
 }
 
-bool SDLCALL OPUS_seek(void *userdata, Uint64 frame)
+bool SDLCALL OPUS_seek(void *track_userdata, Uint64 frame)
 {
-    OPUS_TrackData *tdata = (OPUS_TrackData *) userdata;
+    OPUS_TrackData *tdata = (OPUS_TrackData *) track_userdata;
     // !!! FIXME: I assume op_raw_seek is faster if we're seeking to start, but I could be wrong.
     const int rc = (frame == 0) ? opus.op_raw_seek(tdata->of, 0) : opus.op_pcm_seek(tdata->of, (ogg_int64_t) frame);
     return (rc == 0) ? true : set_op_error("op_pcm_seek", rc);
 }
 
-void SDLCALL OPUS_quit_track(void *userdata)
+void SDLCALL OPUS_quit_track(void *track_userdata)
 {
-    OPUS_TrackData *tdata = (OPUS_TrackData *) userdata;
+    OPUS_TrackData *tdata = (OPUS_TrackData *) track_userdata;
     opus.op_free(tdata->of);
     SDL_CloseIO(tdata->io);
     SDL_free(tdata);

@@ -214,9 +214,9 @@ bool SDLCALL STBVORBIS_init_track(void *audio_userdata, const SDL_AudioSpec *spe
     return true;
 }
 
-bool SDLCALL STBVORBIS_decode(void *userdata, SDL_AudioStream *stream)
+bool SDLCALL STBVORBIS_decode(void *track_userdata, SDL_AudioStream *stream)
 {
-    STBVORBIS_TrackData *tdata = (STBVORBIS_TrackData *) userdata;
+    STBVORBIS_TrackData *tdata = (STBVORBIS_TrackData *) track_userdata;
 
     // !!! FIXME: handle looping.
 
@@ -252,9 +252,9 @@ bool SDLCALL STBVORBIS_decode(void *userdata, SDL_AudioStream *stream)
     return true;  // had more data to decode.
 }
 
-bool SDLCALL STBVORBIS_seek(void *userdata, Uint64 frame)
+bool SDLCALL STBVORBIS_seek(void *track_userdata, Uint64 frame)
 {
-    STBVORBIS_TrackData *tdata = (STBVORBIS_TrackData *) userdata;
+    STBVORBIS_TrackData *tdata = (STBVORBIS_TrackData *) track_userdata;
     const int rc = stb_vorbis_seek_frame(tdata->vorbis, (unsigned int) frame);
     if (!rc) {
         return SetStbVorbisError("stb_vorbis_seek", stb_vorbis_get_error(tdata->vorbis));
@@ -264,9 +264,9 @@ bool SDLCALL STBVORBIS_seek(void *userdata, Uint64 frame)
     return true;
 }
 
-void SDLCALL STBVORBIS_quit_track(void *userdata)
+void SDLCALL STBVORBIS_quit_track(void *track_userdata)
 {
-    STBVORBIS_TrackData *tdata = (STBVORBIS_TrackData *) userdata;
+    STBVORBIS_TrackData *tdata = (STBVORBIS_TrackData *) track_userdata;
     stb_vorbis_close(tdata->vorbis);
     SDL_free(tdata);
 }

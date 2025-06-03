@@ -258,9 +258,9 @@ bool SDLCALL XMP_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL
     return true;
 }
 
-bool SDLCALL XMP_decode(void *userdata, SDL_AudioStream *stream)
+bool SDLCALL XMP_decode(void *track_userdata, SDL_AudioStream *stream)
 {
-    XMP_TrackData *tdata = (XMP_TrackData *) userdata;
+    XMP_TrackData *tdata = (XMP_TrackData *) track_userdata;
 
     if (libxmp.xmp_play_frame(tdata->ctx) < 0) {
         return false;  // either an error or EOF, either way we're done.
@@ -278,16 +278,16 @@ bool SDLCALL XMP_decode(void *userdata, SDL_AudioStream *stream)
     return true;  // had more data to decode.
 }
 
-bool SDLCALL XMP_seek(void *userdata, Uint64 frame)
+bool SDLCALL XMP_seek(void *track_userdata, Uint64 frame)
 {
-    XMP_TrackData *tdata = (XMP_TrackData *) userdata;
+    XMP_TrackData *tdata = (XMP_TrackData *) track_userdata;
     const int err = libxmp.xmp_seek_time(tdata->ctx, (int) MIX_FramesToMS(tdata->freq, frame));
     return err ? SetLibXmpError("xmp_seek_time", err) : true;
 }
 
-void SDLCALL XMP_quit_track(void *userdata)
+void SDLCALL XMP_quit_track(void *track_userdata)
 {
-    XMP_TrackData *tdata = (XMP_TrackData *) userdata;
+    XMP_TrackData *tdata = (XMP_TrackData *) track_userdata;
     libxmp.xmp_stop_module(tdata->ctx);
     libxmp.xmp_end_player(tdata->ctx);
     libxmp.xmp_release_module(tdata->ctx);

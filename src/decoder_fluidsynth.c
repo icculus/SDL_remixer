@@ -307,9 +307,9 @@ failed:
     return false;
 }
 
-bool SDLCALL FLUIDSYNTH_decode(void *userdata, SDL_AudioStream *stream)
+bool SDLCALL FLUIDSYNTH_decode(void *track_userdata, SDL_AudioStream *stream)
 {
-    FLUIDSYNTH_TrackData *tdata = (FLUIDSYNTH_TrackData *) userdata;
+    FLUIDSYNTH_TrackData *tdata = (FLUIDSYNTH_TrackData *) track_userdata;
 
     if (fluidsynth.fluid_player_get_status(tdata->player) != FLUID_PLAYER_PLAYING) {
         return false;
@@ -326,12 +326,12 @@ bool SDLCALL FLUIDSYNTH_decode(void *userdata, SDL_AudioStream *stream)
     return true;
 }
 
-bool SDLCALL FLUIDSYNTH_seek(void *userdata, Uint64 frame)
+bool SDLCALL FLUIDSYNTH_seek(void *track_userdata, Uint64 frame)
 {
 #if (FLUIDSYNTH_VERSION_MAJOR < 2)
     return SDL_Unsupported();
 #else
-    FLUIDSYNTH_TrackData *tdata = (FLUIDSYNTH_TrackData *) userdata;
+    FLUIDSYNTH_TrackData *tdata = (FLUIDSYNTH_TrackData *) track_userdata;
     const int ticks = (int) MIX_FramesToMS(tdata->freq, frame);
 
     // !!! FIXME: docs say this will fail if a seek was requested and then a second seek happens before we play more of the midi file, since the first seek will still be in progress.
@@ -339,9 +339,9 @@ bool SDLCALL FLUIDSYNTH_seek(void *userdata, Uint64 frame)
 #endif
 }
 
-void SDLCALL FLUIDSYNTH_quit_track(void *userdata)
+void SDLCALL FLUIDSYNTH_quit_track(void *track_userdata)
 {
-    FLUIDSYNTH_TrackData *tdata = (FLUIDSYNTH_TrackData *) userdata;
+    FLUIDSYNTH_TrackData *tdata = (FLUIDSYNTH_TrackData *) track_userdata;
     fluidsynth.fluid_player_stop(tdata->player);
     fluidsynth.delete_fluid_player(tdata->player);
     fluidsynth.delete_fluid_synth(tdata->synth);
