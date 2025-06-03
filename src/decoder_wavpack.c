@@ -65,7 +65,7 @@ typedef struct {
 } WavpackStreamReader64;
 #endif
 
-#define MIX_LOADER_FUNCTIONS \
+#define MIX_LOADER_FUNCTIONS_wavpackbase \
     MIX_LOADER_FUNCTION(true,uint32_t,WavpackGetLibraryVersion,(void)) \
     MIX_LOADER_FUNCTION(true,char*,WavpackGetErrorMessage,(WavpackContext*)) \
     MIX_LOADER_FUNCTION(true,WavpackContext*,WavpackOpenFileInputEx,(WavpackStreamReader *, void *, void *, char *, int, int)) \
@@ -77,12 +77,19 @@ typedef struct {
     MIX_LOADER_FUNCTION(true,uint32_t,WavpackGetSampleRate,(WavpackContext*)) \
     MIX_LOADER_FUNCTION(true,uint32_t,WavpackUnpackSamples,(WavpackContext*, int32_t *buffer, uint32_t samples)) \
     MIX_LOADER_FUNCTION(true,int,WavpackSeekSample,(WavpackContext*, uint32_t sample)) \
-    MIX_LOADER_FUNCTION(true,uint32_t,WavpackGetSampleIndex,(WavpackContext*)) \
-    /* WavPack 5.x functions with 64 bit support: */ \
+    MIX_LOADER_FUNCTION(true,uint32_t,WavpackGetSampleIndex,(WavpackContext*))
+
+#if defined(WAVPACK4_OR_OLDER) && !defined(WAVPACK_DYNAMIC)
+#define MIX_LOADER_FUNCTIONS MIX_LOADER_FUNCTIONS_wavpackbase
+#else
+/* WavPack 5.x functions with 64 bit support: */
+#define MIX_LOADER_FUNCTIONS \
+    MIX_LOADER_FUNCTIONS_wavpackbase \
     MIX_LOADER_FUNCTION(false,WavpackContext*,WavpackOpenFileInputEx64,(WavpackStreamReader64 *reader, void *wv_id, void *wvc_id, char *error, int flags, int norm_offset)) \
     MIX_LOADER_FUNCTION(false,int64_t,WavpackGetNumSamples64,(WavpackContext*)) \
     MIX_LOADER_FUNCTION(false,int64_t,WavpackGetSampleIndex64,(WavpackContext*)) \
-    MIX_LOADER_FUNCTION(false,int,WavpackSeekSample64,(WavpackContext*, int64_t sample)) \
+    MIX_LOADER_FUNCTION(false,int,WavpackSeekSample64,(WavpackContext*, int64_t sample))
+#endif
 
 #define MIX_LOADER_MODULE wavpack
 #include "SDL_mixer_loader.h"
@@ -390,9 +397,12 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
     }
 
     // now open the memory buffers for serious processing.
-    ctx = (wavpack.WavpackOpenFileInputEx64 != NULL) ?
-            wavpack.WavpackOpenFileInputEx64(&WAVPACK_IoReader64, io, wvcio, err, OPEN_NORMALIZE|OPEN_TAGS|FLAGS_DSD, 0) :
-            wavpack.WavpackOpenFileInputEx(&WAVPACK_IoReader32, io, wvcio, err, OPEN_NORMALIZE|OPEN_TAGS, 0);
+    ctx =
+    #if !defined(WAVPACK4_OR_OLDER) || defined(WAVPACK_DYNAMIC)
+      (wavpack.WavpackOpenFileInputEx64 != NULL) ?
+       wavpack.WavpackOpenFileInputEx64(&WAVPACK_IoReader64, io, wvcio, err, OPEN_NORMALIZE|OPEN_TAGS|FLAGS_DSD, 0) :
+    #endif
+       wavpack.WavpackOpenFileInputEx(&WAVPACK_IoReader32, io, wvcio, err, OPEN_NORMALIZE|OPEN_TAGS, 0);
     if (!ctx) {
         SDL_SetError("%s", err);
         goto failed;
@@ -400,7 +410,11 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
 
     adata->wvcdata = wvcdata;
     adata->wvcdatalen = wvcdatalen;
-    adata->numsamples = wavpack.WavpackGetNumSamples64 ? wavpack.WavpackGetNumSamples64(ctx) : wavpack.WavpackGetNumSamples(ctx);
+    adata->numsamples = 
+    #if !defined(WAVPACK4_OR_OLDER) || defined(WAVPACK_DYNAMIC)
+      wavpack.WavpackGetNumSamples64 ? wavpack.WavpackGetNumSamples64(ctx) :
+    #endif
+      wavpack.WavpackGetNumSamples(ctx);
     adata->bps = wavpack.WavpackGetBytesPerSample(ctx) << 3;
     adata->mode = wavpack.WavpackGetMode(ctx);
     adata->channels = (int) wavpack.WavpackGetNumChannels(ctx);
@@ -485,9 +499,12 @@ bool SDLCALL WAVPACK_init_track(void *audio_userdata, SDL_IOStream *io, const SD
     }
 
     // now open the memory buffers for serious processing.
-    tdata->ctx = (wavpack.WavpackOpenFileInputEx64 != NULL) ?
-                wavpack.WavpackOpenFileInputEx64(&WAVPACK_IoReader64, io, tdata->wvcio, err, OPEN_NORMALIZE|OPEN_TAGS|FLAGS_DSD, 0) :
-                wavpack.WavpackOpenFileInputEx(&WAVPACK_IoReader32, io, tdata->wvcio, err, OPEN_NORMALIZE|OPEN_TAGS, 0);
+    tdata->ctx =
+    #if !defined(WAVPACK4_OR_OLDER) || defined(WAVPACK_DYNAMIC)
+      (wavpack.WavpackOpenFileInputEx64 != NULL) ?
+       wavpack.WavpackOpenFileInputEx64(&WAVPACK_IoReader64, io, tdata->wvcio, err, OPEN_NORMALIZE|OPEN_TAGS|FLAGS_DSD, 0) :
+    #endif
+       wavpack.WavpackOpenFileInputEx(&WAVPACK_IoReader32, io, tdata->wvcio, err, OPEN_NORMALIZE|OPEN_TAGS, 0);
 
     if (!tdata->ctx) {
         goto failed;
@@ -560,9 +577,12 @@ bool SDLCALL WAVPACK_decode(void *track_userdata, SDL_AudioStream *stream)
 bool SDLCALL WAVPACK_seek(void *track_userdata, Uint64 frame)
 {
     WAVPACK_TrackData *tdata = (WAVPACK_TrackData *) track_userdata;
-    const int success = (wavpack.WavpackSeekSample64 != NULL) ?
-                            wavpack.WavpackSeekSample64(tdata->ctx, frame) :
-                            wavpack.WavpackSeekSample(tdata->ctx, (uint32_t) frame);
+    const int success =
+    #if !defined(WAVPACK4_OR_OLDER) || defined(WAVPACK_DYNAMIC)
+      (wavpack.WavpackSeekSample64 != NULL) ?
+       wavpack.WavpackSeekSample64(tdata->ctx, frame) :
+    #endif
+       wavpack.WavpackSeekSample(tdata->ctx, (uint32_t) frame);
     if (!success) {
         return SDL_SetError("%s", wavpack.WavpackGetErrorMessage(tdata->ctx));
     }
