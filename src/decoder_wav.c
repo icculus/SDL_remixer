@@ -23,6 +23,7 @@
 
 #include "SDL_mixer_internal.h"
 
+// !!! FIXME: SDL_LoadWAV_IO doesn't make sense anymore, because we might not be precaching the whole file in RAM upfront.  :/
 static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
     Uint8 *buffer = NULL;

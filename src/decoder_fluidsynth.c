@@ -70,8 +70,6 @@
 
 typedef struct FLUIDSYNTH_AudioData
 {
-    const Uint8 *data;
-    size_t datalen;
     const Uint8 *sfdata;
     size_t sfdatalen;
 } FLUIDSYNTH_AudioData;
@@ -138,14 +136,8 @@ static bool SDLCALL FLUIDSYNTH_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec,
         return SDL_SetError("Not a MIDI audio stream");
     }
 
-    // now rewind, load the whole thing to memory, and use that buffer for future processing.
-    if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {
-        if (sfio && closesfio) { SDL_CloseIO(sfio); }
-        return false;
-    }
-    size_t datalen = 0;
-    Uint8 *data = (Uint8 *) SDL_LoadFile_IO(io, &datalen, false);
-    if (!data) {
+    // Go back and do a proper load now to get metadata.
+    if (SDL_SeekIO(io, SDL_IO_SEEK_SET, 0) == -1) {
         if (sfio && closesfio) { SDL_CloseIO(sfio); }
         return false;
     }
@@ -158,7 +150,6 @@ static bool SDLCALL FLUIDSYNTH_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec,
             SDL_CloseIO(sfio);
         }
         if (!sfdata) {
-            SDL_free(data);
             return false;
         }
     }
@@ -166,12 +157,9 @@ static bool SDLCALL FLUIDSYNTH_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec,
     FLUIDSYNTH_AudioData *adata = (FLUIDSYNTH_AudioData *) SDL_calloc(1, sizeof (*adata));
     if (!adata) {
         SDL_free(sfdata);
-        SDL_free(data);
         return false;
     }
 
-    adata->data = data;
-    adata->datalen = datalen;
     adata->sfdata = sfdata;
     adata->sfdatalen = sfdatalen;
 
@@ -192,7 +180,7 @@ static void *SoundFontOpen(const char *filename)
     if (SDL_sscanf(filename, "&FAKESFNAME&%p", &ptr) != 1) {
         return NULL;
     }
-    return ptr;  // (this is actually a const-mem SDL_IOStream pointer.)
+    return ptr;  // (this is actually an SDL_IOStream pointer.)
 }
  
 static int SoundFontRead(void *buf, fluid_long_long_t count, void *handle)
@@ -224,7 +212,7 @@ static fluid_long_long_t SoundFontTell(void *handle)
 }
 
 
-bool SDLCALL FLUIDSYNTH_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
+bool SDLCALL FLUIDSYNTH_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
     FLUIDSYNTH_TrackData *tdata = (FLUIDSYNTH_TrackData *) SDL_calloc(1, sizeof (*tdata));
     if (!tdata) {
@@ -233,6 +221,9 @@ bool SDLCALL FLUIDSYNTH_init_track(void *audio_userdata, const SDL_AudioSpec *sp
 
     const FLUIDSYNTH_AudioData *adata = (const FLUIDSYNTH_AudioData *) audio_userdata;
     double samplerate = 0.0;
+    void *buffer = NULL;
+    bool copied = false;
+    size_t datalen = 0;
 
     tdata->settings = fluidsynth.new_fluid_settings();
     if (!tdata->settings) {
@@ -268,13 +259,27 @@ bool SDLCALL FLUIDSYNTH_init_track(void *audio_userdata, const SDL_AudioSpec *sp
         }
     }
 
+    // libfluidsynth doesn't have an abstract loader mechanism, you have to either give it a file path or the whole thing
+    //  in one memory buffer upfront. Fortunately MIDI files tend to be extremely small, so just slurp it all in.
+    // (and, if `io` appears to be a memory-based SDL_IOStream, just hand it the memory buffer directly.)
+    buffer = MIX_SlurpConstIO(io, &datalen, &copied);
+    if (!buffer) {
+        goto failed;
+    }
+
     tdata->player = fluidsynth.new_fluid_player(tdata->synth);
     if (!tdata->player) {
         SDL_SetError("Failed to create FluidSynth player");
         goto failed;
     }
 
-    if (fluidsynth.fluid_player_add_mem(tdata->player, adata->data, adata->datalen) != FLUID_OK) {
+    const bool okay = (fluidsynth.fluid_player_add_mem(tdata->player, buffer, datalen) == FLUID_OK);
+    if (copied) {
+        SDL_free(buffer);
+        buffer = NULL;
+    }
+
+    if (!okay) {
         SDL_SetError("FluidSynth failed to load in-memory song");
         goto failed;
     }
@@ -302,6 +307,9 @@ failed:
     if (tdata->settings) {
         fluidsynth.delete_fluid_settings(tdata->settings);
     }
+    if (buffer && copied) {
+        SDL_free(buffer);
+    }
     SDL_free(tdata);
 
     return false;
@@ -319,8 +327,6 @@ bool SDLCALL FLUIDSYNTH_decode(void *track_userdata, SDL_AudioStream *stream)
     if (fluidsynth.fluid_synth_write_float(tdata->synth, SDL_arraysize(samples) / 2, samples, 0, 2, samples, 1, 2) != FLUID_OK) {
         return false;  // maybe EOF...?
     }
-
-//{ static SDL_IOStream *io = NULL; if (!io) { io = SDL_IOFromFile("decoded.raw", "wb"); } if (io) { SDL_WriteIO(io, samples, sizeof (samples)); SDL_FlushIO(io); } }
 
     SDL_PutAudioStreamData(stream, samples, sizeof (samples));
     return true;
@@ -351,10 +357,9 @@ void SDLCALL FLUIDSYNTH_quit_track(void *track_userdata)
 
 void SDLCALL FLUIDSYNTH_quit_audio(void *audio_userdata)
 {
-    FLUIDSYNTH_AudioData *tdata = (FLUIDSYNTH_AudioData *) audio_userdata;
-    SDL_free((void *) tdata->sfdata);
-    SDL_free((void *) tdata->data);
-    SDL_free(tdata);
+    FLUIDSYNTH_AudioData *adata = (FLUIDSYNTH_AudioData *) audio_userdata;
+    SDL_free((void *) adata->sfdata);
+    SDL_free(adata);
 }
 
 MIX_Decoder MIX_Decoder_FLUIDSYNTH = {

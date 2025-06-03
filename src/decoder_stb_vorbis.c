@@ -25,6 +25,7 @@
 
 #include "SDL_mixer_internal.h"
 
+#define STB_VORBIS_SDL 1  /* enable our patches to stb_vorbis */
 #define STB_VORBIS_NO_STDIO 1
 #define STB_VORBIS_NO_CRT 1
 #define STB_VORBIS_NO_PUSHDATA_API 1
@@ -104,8 +105,6 @@ static bool SetStbVorbisError(const char *function, int error)
 
 typedef struct STBVORBIS_AudioData
 {
-    const Uint8 *data;
-    size_t datalen;
     bool loop;
     Sint64 loop_start;
     Sint64 loop_end;
@@ -122,7 +121,7 @@ typedef struct STBVORBIS_TrackData
 
 static bool SDLCALL STBVORBIS_init(void)
 {
-    return true;
+    return true;  // nothing external to load, so it always succeeds.
 }
 
 static void SDLCALL STBVORBIS_quit(void)
@@ -145,31 +144,20 @@ static bool SDLCALL STBVORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, 
         return SDL_SetError("Not an Ogg Vorbis audio stream");
     }
 
-    // now rewind, load the whole thing to memory, and use that buffer for future processing.
+    // Go back and do a proper load now to get metadata.
     if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {
-        return false;
-    }
-    size_t datalen = 0;
-    Uint8 *data = (Uint8 *) SDL_LoadFile_IO(io, &datalen, false);
-    if (!data) {
         return false;
     }
 
     STBVORBIS_AudioData *adata = (STBVORBIS_AudioData *) SDL_calloc(1, sizeof (*adata));
     if (!adata) {
-        SDL_free(data);
         return false;
     }
 
-    adata->data = data;
-    adata->datalen = datalen;
-
-    // now open the memory buffer for serious processing.
+    // now open the stream for serious processing.
     int error = 0;
-    stb_vorbis *vorbis = stb_vorbis_open_memory((const unsigned char *) data, (int) datalen, &error, NULL);
+    stb_vorbis *vorbis = stb_vorbis_open_io(io, 0, &error, NULL);
     if (!vorbis) {
-        SDL_free(data);
-        SDL_free(adata);
         return SetStbVorbisError("stb_vorbis_open_memory", error);
     }
 
@@ -191,23 +179,21 @@ static bool SDLCALL STBVORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, 
     return true;
 }
 
-bool SDLCALL STBVORBIS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
+bool SDLCALL STBVORBIS_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
     STBVORBIS_TrackData *tdata = (STBVORBIS_TrackData *) SDL_calloc(1, sizeof (*tdata));
     if (!tdata) {
         return false;
     }
 
-    const STBVORBIS_AudioData *adata = (const STBVORBIS_AudioData *) audio_userdata;
-
     int error = 0;
-    tdata->vorbis = stb_vorbis_open_memory((const unsigned char *) adata->data, (int) adata->datalen, &error, NULL);
+    tdata->vorbis = stb_vorbis_open_io(io, 0, &error, NULL);
     if (!tdata->vorbis) {
         SDL_free(tdata);
-        return SetStbVorbisError("stb_vorbis_open_memory", error);
+        return SetStbVorbisError("stb_vorbis_open_io", error);
     }
 
-    tdata->adata = adata;
+    tdata->adata = (const STBVORBIS_AudioData *) audio_userdata;
 
     *track_userdata = tdata;
 
@@ -273,9 +259,7 @@ void SDLCALL STBVORBIS_quit_track(void *track_userdata)
 
 void SDLCALL STBVORBIS_quit_audio(void *audio_userdata)
 {
-    STBVORBIS_AudioData *tdata = (STBVORBIS_AudioData *) audio_userdata;
-    SDL_free((void *) tdata->data);
-    SDL_free(tdata);
+    SDL_free(audio_userdata);
 }
 
 MIX_Decoder MIX_Decoder_STBVORBIS = {

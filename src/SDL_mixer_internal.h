@@ -76,13 +76,26 @@ typedef struct MIX_VBAP2D
 void MIX_VBAP2D_Init(MIX_VBAP2D *vbap2d, int speaker_count);
 
 
+// Clamp an IOStream to a subset of its available data...this is used to cut ID3 (etc) tags off
+//  both ends of an audio file, making it look like the file just doesn't have those bytes.
+
+typedef struct MIX_IoClamp
+{
+    SDL_IOStream *io;
+    Sint64 start;
+    Sint64 length;
+    Sint64 pos;
+} MIX_IoClamp;
+
+extern SDL_IOStream *MIX_OpenIoClamp(MIX_IoClamp *clamp, SDL_IOStream *io);
+
 
 typedef struct MIX_Decoder
 {
     const char *name;
     bool (SDLCALL *init)(void);   // initialize the decoder (load external libraries, etc).
     bool (SDLCALL *init_audio)(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata);  // see if it's a supported format, init spec, set metadata in props, allocate static userdata and payload.
-    bool (SDLCALL *init_track)(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata);  // init decoder instance data for a single track.
+    bool (SDLCALL *init_track)(void *audio_userdata, SDL_IOStream *io, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata);  // init decoder instance data for a single track.
     bool (SDLCALL *decode)(void *track_userdata, SDL_AudioStream *stream);
     bool (SDLCALL *seek)(void *track_userdata, Uint64 frame);
     void (SDLCALL *quit_track)(void *track_userdata);
@@ -104,7 +117,12 @@ struct MIX_Audio
     SDL_AudioSpec spec;
     const MIX_Decoder *decoder;
     void *decoder_userdata;
+    const void *precache;    // non-NULL if this cached the audio data (might be NULL if we're feeding from an external SDL_IOStream).
+    size_t precachelen;
+    bool free_precache;
     Sint64 duration_frames;
+    Sint64 clamp_offset;
+    Sint64 clamp_length;
     MIX_Audio *prev;  // double-linked list for all_audios.
     MIX_Audio *next;
 };
@@ -120,6 +138,9 @@ struct MIX_Track
     float *input_buffer;  // a place to process audio as it progresses through the callback.
     size_t input_buffer_len;  // number of bytes allocated to input_buffer.
     MIX_Audio *input_audio;    // non-NULL if used with MIX_SetTrackAudioStream. Holds a reference.
+    SDL_IOStream *io;  // used for MIX_SetTrackAudio and MIX_SetTrackIOStream. Might be owned by us (SDL_IOFromConstMem of MIX_Audio::precache), or owned by the app.
+    MIX_IoClamp ioclamp;  // used for MIX_SetTrackAudio and MIX_SetTrackIOStream.
+    bool closeio;  // true if we should close `io` when changing track data.
     SDL_AudioStream *input_stream;  // used for both MIX_SetTrackAudio and MIX_SetTrackAudioStream. Maybe not owned by SDL_mixer!
     SDL_AudioStream *internal_stream;  // used with MIX_SetTrackAudio, where it is also assigned to input_stream. Owned by SDL_mixer!
     void *decoder_userdata;  // MIX_Decoder-specific data for this run, if any.
@@ -194,6 +215,7 @@ struct MIX_Mixer
 #define MIX_PROP_DECODER_FLUIDSYNTH_SOUNDFONT_IOSTREAM_POINTER "SDL_mixer.decoder.fluidsynth.soundfont_iostream"
 #define MIX_PROP_DECODER_FLUIDSYNTH_SOUNDFONT_PATH_STRING "SDL_mixer.decoder.fluidsynth.soundfont_path"
 #define MIX_PROP_AUDIO_LOAD_PATH_STRING "SDL_mixer.audio.load.path"
+#define MIX_PROP_AUDIO_LOAD_ONDEMAND_BOOLEAN "SDL_mixer.audio.load.ondemand"
 
 #define MIX_DURATION_UNKNOWN -1
 #define MIX_DURATION_INFINITE -2
@@ -206,30 +228,6 @@ typedef struct MIX_TagList
     SDL_RWLock *rwlock;
 } MIX_TagList;
 
-// Clamp an IOStream to a subset of its available data...this is used to cut ID3 (etc) tags off
-//  both ends of an audio file, making it look like the file just doesn't have those bytes.
-
-typedef struct MIX_IoClamp
-{
-    SDL_IOStream *io;
-    Sint64 start;
-    Sint64 length;
-    Sint64 pos;
-} MIX_IoClamp;
-
-extern SDL_IOStream *MIX_OpenIoClamp(MIX_IoClamp *clamp, SDL_IOStream *io);
-
-
-// access to the RAW "decoder" from other parts of SDL_mixer, without having to set up properties or copy the payload.
-extern void *MIX_RAW_InitFromMemoryBuffer(const void *data, const size_t datalen, const SDL_AudioSpec *spec, Sint64 *duration_frames, bool free_when_done);
-
-// decoders that are mostly picking out the raw PCM payload from an uncompressed format can use the RAW decoder for most of their implementation.
-extern bool SDLCALL MIX_RAW_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID metadata_props, void **userdata);
-extern bool SDLCALL MIX_RAW_decode(void *userdata, SDL_AudioStream *stream);
-extern bool SDLCALL MIX_RAW_seek(void *userdata, Uint64 frame);
-extern void SDLCALL MIX_RAW_quit_track(void *userdata);
-extern void SDLCALL MIX_RAW_quit_audio(void *audio_userdata);
-
 // Parse through an SDL_IOStream for tags (ID3, APE, MusicMatch, etc), and add metadata to props.
 // !!! FIXME: see FIXME in the function's implementation; just ignore return values from this function for now.
 extern bool MIX_ReadMetadataTags(SDL_IOStream *io, SDL_PropertiesID props, MIX_IoClamp *clamp);
@@ -239,6 +237,12 @@ void MIX_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, 
 
 // `panning` and `speakers` need to be arrays of 2 elements each, to be filled in with what speakers to write to, and at what gain. `position` must be 16 bytes (only 12 are used), aligned to 16 bytes.
 void MIX_Spatialize(const MIX_VBAP2D *vbap2d, const float *position, float *panning, int *speakers);
+
+// if we think `io` is backed by a memory buffer, return its pointer and buffer length for direct access.
+void *MIX_GetConstIOBuffer(SDL_IOStream *io, size_t *datalen);
+
+// Slurp in all the data from an SDL_IOStream; if it appears to be memory-based, return the pointer with no allocation or copy made.
+void *MIX_SlurpConstIO(SDL_IOStream *io, size_t *datalen, bool *copied);
 
 
 // these might not all be available, but they are all declared here as if they are.

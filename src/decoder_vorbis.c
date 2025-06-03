@@ -71,8 +71,6 @@
 
 typedef struct VORBIS_AudioData
 {
-    const Uint8 *data;
-    size_t datalen;
     bool loop;
     Sint64 loop_start;
     Sint64 loop_end;
@@ -82,7 +80,6 @@ typedef struct VORBIS_AudioData
 typedef struct VORBIS_TrackData
 {
     const VORBIS_AudioData *adata;
-    SDL_IOStream *io;  // a const-mem IOStream for accessing the adata's data.
     OggVorbis_File vf;
     int current_channels;
     int current_freq;
@@ -154,53 +151,32 @@ static const ov_callbacks VORBIS_IoCallbacks = { VORBIS_IoRead, VORBIS_IoSeek, V
 static bool SDLCALL VORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
     // just load the bare minimum from the IOStream to verify it's an Ogg Vorbis file.
+    // !!! FIXME: is ov_open_callbacks going to return more slowly if this isn't an Opus file? It's probably better to just do the full open.
     OggVorbis_File vf;
     if (vorbis.ov_test_callbacks(io, &vf, NULL, 0, VORBIS_IoCallbacks) < 0) {
         return SDL_SetError("Not an Ogg Vorbis audio stream");
     }
     vorbis.ov_clear(&vf);
 
-    // now rewind, load the whole thing to memory, and use that buffer for future processing.
+    // Go back and do a proper load now to get metadata.
     if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {
-        return false;
-    }
-    size_t datalen = 0;
-    Uint8 *data = (Uint8 *) SDL_LoadFile_IO(io, &datalen, false);
-    if (!data) {
         return false;
     }
 
     VORBIS_AudioData *adata = (VORBIS_AudioData *) SDL_calloc(1, sizeof (*adata));
     if (!adata) {
-        SDL_free(data);
         return false;
     }
 
-    adata->data = data;
-    adata->datalen = datalen;
-
-    io = SDL_IOFromConstMem(data, datalen);  // switch over to a memory IOStream.
-    if (!io) {  // uhoh.
-        SDL_free(data);
-        SDL_free(adata);
-        return false;
-    }
-
-    // now open the memory buffer for serious processing.
+    // now open the stream for serious processing.
     const int rc = vorbis.ov_open_callbacks(io, &vf, NULL, 0, VORBIS_IoCallbacks);
     if (rc < 0) {
-        SDL_CloseIO(io);
-        SDL_free(data);
-        SDL_free(adata);
         return SetOggVorbisError("ov_open_callbacks", rc);
     }
 
     const vorbis_info *vi = vorbis.ov_info(&vf, -1);
     if (!vi) {
         vorbis.ov_clear(&vf);
-        SDL_CloseIO(io);
-        SDL_free(data);
-        SDL_free(adata);
         return SDL_SetError("Couldn't get Ogg Vorbis info; corrupt data?");
     }
 
@@ -217,7 +193,6 @@ static bool SDLCALL VORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
     const Sint64 full_length = (Sint64) vorbis.ov_pcm_total(&vf, -1);
     adata->loop = ((adata->loop_end > 0) && (adata->loop_end <= full_length) && (adata->loop_start < adata->loop_end));
     vorbis.ov_clear(&vf);  // done with this instance. Tracks will maintain their own OggVorbis_File object.
-    SDL_CloseIO(io);  // close our memory i/o.
 
     *duration_frames = adata->loop ? MIX_DURATION_INFINITE : full_length;  // if looping, stream is infinite.
     *audio_userdata = adata;
@@ -225,7 +200,7 @@ static bool SDLCALL VORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
     return true;
 }
 
-bool SDLCALL VORBIS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
+bool SDLCALL VORBIS_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
     VORBIS_TrackData *tdata = (VORBIS_TrackData *) SDL_calloc(1, sizeof (*tdata));
     if (!tdata) {
@@ -234,16 +209,9 @@ bool SDLCALL VORBIS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, 
 
     const VORBIS_AudioData *adata = (const VORBIS_AudioData *) audio_userdata;
 
-    tdata->io = SDL_IOFromConstMem(adata->data, adata->datalen);
-    if (!tdata->io) {  // uhoh.
-        SDL_free(tdata);
-        return false;
-    }
-
-    // now open the memory buffer for serious processing.
-    int rc = vorbis.ov_open_callbacks(tdata->io, &tdata->vf, NULL, 0, VORBIS_IoCallbacks);
+    // now open the stream for serious processing.
+    int rc = vorbis.ov_open_callbacks(io, &tdata->vf, NULL, 0, VORBIS_IoCallbacks);
     if (rc < 0) {
-        SDL_CloseIO(tdata->io);
         SDL_free(tdata);
         return SetOggVorbisError("ov_open_callbacks", rc);
     }
@@ -318,15 +286,12 @@ void SDLCALL VORBIS_quit_track(void *track_userdata)
 {
     VORBIS_TrackData *tdata = (VORBIS_TrackData *) track_userdata;
     vorbis.ov_clear(&tdata->vf);
-    SDL_CloseIO(tdata->io);
     SDL_free(tdata);
 }
 
 void SDLCALL VORBIS_quit_audio(void *audio_userdata)
 {
-    VORBIS_AudioData *tdata = (VORBIS_AudioData *) audio_userdata;
-    SDL_free((void *) tdata->data);
-    SDL_free(tdata);
+    SDL_free(audio_userdata);
 }
 
 MIX_Decoder MIX_Decoder_VORBIS = {

@@ -826,23 +826,24 @@ bool MIX_GetMixerFormat(MIX_Mixer *mixer, SDL_AudioSpec *spec)
     return true;  // technically this is the output format, forced to float32.
 }
 
-static const MIX_Decoder *PrepareDecoder(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
+static const MIX_Decoder *PrepareDecoder(SDL_IOStream *io, MIX_Audio *audio)
 {
-    const char *decoder_name = SDL_GetStringProperty(props, MIX_PROP_AUDIO_DECODER_STRING, NULL);
+    const char *decoder_name = SDL_GetStringProperty(audio->props, MIX_PROP_AUDIO_DECODER_STRING, NULL);
 
     SDL_AudioSpec original_spec;
-    SDL_copyp(&original_spec, spec);
+    SDL_copyp(&original_spec, &audio->spec);
 
     for (int i = 0; i < num_available_decoders; i++) {
         const MIX_Decoder *decoder = available_decoders[i];
         if (!decoder_name || (SDL_strcasecmp(decoder->name, decoder_name) == 0)) {
-            if (decoder->init_audio(io, spec, props, duration_frames, audio_userdata)) {
+            if (decoder->init_audio(io, &audio->spec, audio->props, &audio->duration_frames, &audio->decoder_userdata)) {
+                audio->decoder = decoder;
                 return decoder;
             } else if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) == -1) {   // note this seeks to offset 0, because we're using an IoClamp.
                 SDL_SetError("Can't seek in stream to find proper decoder");
                 return NULL;
             }
-            SDL_copyp(spec, &original_spec);  // reset this, in case init_audio changed it and then failed.
+            SDL_copyp(&audio->spec, &original_spec);  // reset this, in case init_audio changed it and then failed.
         }
     }
 
@@ -850,22 +851,23 @@ static const MIX_Decoder *PrepareDecoder(SDL_IOStream *io, SDL_AudioSpec *spec, 
     return NULL;
 }
 
-static void *DecodeWholeFile(const MIX_Decoder *decoder, void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, size_t *decoded_len)
+static void *DecodeWholeFile(MIX_Audio *audio, SDL_IOStream *io, size_t *decoded_len)
 {
     size_t bytes_decoded = 0;
     Uint8 *decoded = NULL;
-    SDL_AudioStream *stream = SDL_CreateAudioStream(spec, spec);   // !!! FIXME: if we're decoding up front, we might as well convert to float here too, right?
+    SDL_AudioStream *stream = SDL_CreateAudioStream(&audio->spec, &audio->spec);   // !!! FIXME: if we're decoding up front, we might as well convert to float here too, right?
     if (stream) {
-        void *userdata = NULL;
-        if (decoder->init_track(audio_userdata, spec, props, &userdata)) {
-            while (decoder->decode(userdata, stream)) {
+        const MIX_Decoder *decoder = audio->decoder;
+        void *track_userdata = NULL;
+        if (decoder->init_track(audio->decoder_userdata, io, &audio->spec, audio->props, &track_userdata)) {
+            while (decoder->decode(track_userdata, stream)) {
                 // spin.
             }
-            decoder->quit_track(userdata);
+            decoder->quit_track(track_userdata);
 
             SDL_FlushAudioStream(stream);
             const int available = SDL_GetAudioStreamAvailable(stream);
-            decoded = (Uint8 *) SDL_malloc(available);
+            decoded = (Uint8 *) SDL_malloc(available);   // !!! FIXME: SIMD align?
             if (decoded) {
                 const int rc = SDL_GetAudioStreamData(stream, decoded, available);
                 SDL_assert((rc < 0) || (rc == available));
@@ -892,13 +894,15 @@ MIX_Audio *MIX_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
 
     SDL_IOStream *origio = (SDL_IOStream *) SDL_GetPointerProperty(props, MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER, NULL);
     MIX_Mixer *mixer = (MIX_Mixer *) SDL_GetPointerProperty(props, MIX_PROP_AUDIO_LOAD_PREFERRED_MIXER_POINTER, NULL);
-    const bool closeio = SDL_GetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_CLOSEIO_BOOLEAN, false);
     const bool predecode = SDL_GetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_PREDECODE_BOOLEAN, false);
+    const bool closeio = SDL_GetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_CLOSEIO_BOOLEAN, false);
+    const bool ondemand = SDL_GetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_ONDEMAND_BOOLEAN, false);
+    const bool skip_metadata_tags = SDL_GetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_SKIP_METADATA_TAGS_BOOLEAN, false);
     void *audio_userdata = NULL;
     const MIX_Decoder *decoder = NULL;
     SDL_IOStream *io = NULL;
+    SDL_IOStream *ioclamp = NULL;
     MIX_IoClamp clamp;
-    Sint64 duration_frames = MIX_DURATION_UNKNOWN;
     SDL_AudioSpec recommended_spec = { SDL_AUDIO_F32, 2, 48000 };  // a reasonable default if no mixer specified.
     if (mixer) {
         SDL_copyp(&recommended_spec, &mixer->spec);
@@ -909,6 +913,7 @@ MIX_Audio *MIX_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
         goto failed;
     }
 
+    audio->duration_frames = MIX_DURATION_UNKNOWN;
     audio->props = SDL_CreateProperties();
     if (!audio->props) {
         goto failed;
@@ -919,17 +924,26 @@ MIX_Audio *MIX_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
     }
 
     // check for ID3/APE/MusicMatch/whatever tags here, in case they were slapped onto the edge of any random file format.
-    // !!! FIXME: add a property to skip tag detection, for apps that know they don't have them, or don't want them, and want to save some CPU and i/o.
-    if (origio) {
-        io = MIX_OpenIoClamp(&clamp, origio);
+    audio->clamp_offset = -1;
+    audio->clamp_length = -1;
+    if (origio && !skip_metadata_tags) {
+        ioclamp = io = MIX_OpenIoClamp(&clamp, origio);
         if (!io) {
             goto failed;
         }
+
+        const Sint64 orig_filelen = clamp.length;
 
         // !!! FIXME: currently we're ignoring return values from this function (see FIXME at the top of its code).
         MIX_ReadMetadataTags(io, audio->props, &clamp);
         if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {
             goto failed;
+        }
+
+        // will we need to apply an IoClamp when reading the real data later, too?
+        if ((clamp.start != 0) || (clamp.length != orig_filelen)) {
+            audio->clamp_offset = clamp.start;
+            audio->clamp_length = clamp.length;
         }
     }
 
@@ -938,14 +952,41 @@ MIX_Audio *MIX_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
     // sample rate, so it might as well do it at device format to avoid an unnecessary resample later).
     SDL_copyp(&audio->spec, &recommended_spec);
 
-    decoder = PrepareDecoder(io, &audio->spec, audio->props, &duration_frames, &audio_userdata);
+    decoder = PrepareDecoder(io, audio);
     if (!decoder) {
         goto failed;
     }
 
-    if (io) {
-        SDL_CloseIO(io);  // IoClamp's close doesn't close the original stream, but we still need to free its resources here.
-        io = NULL;
+    audio_userdata = audio->decoder_userdata;  // less wordy access to this pointer.  :)
+
+    // Go back to start of the SDL_IOStream, since we're either precaching, predecoding, or maybe just getting ready to actually play the thing.
+    if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) == -1) {   // note this seeks to offset 0, because we're using an IoClamp.
+        goto failed;
+    }
+
+    // set this before predecoding might change `decoder` to the RAW implementation.
+    SDL_SetStringProperty(audio->props, MIX_PROP_AUDIO_DECODER_STRING, decoder->name);
+
+    // if this is already raw data, predecoding is just going to make a copy of it, so skip it.
+    if (predecode && (decoder != &MIX_Decoder_RAW) && (audio->duration_frames != MIX_DURATION_INFINITE)) {
+        audio->precache = DecodeWholeFile(audio, io, &audio->precachelen);
+        if (!audio->precache) {
+            goto failed;
+        }
+        decoder->quit_audio(audio_userdata);
+
+        decoder = audio->decoder = &MIX_Decoder_RAW;
+        audio_userdata = audio->decoder_userdata = NULL;  // no audio_userdata state in the RAW decoder (so we can cheat here and not do a full init_audio().)
+        audio->duration_frames = audio->precachelen / SDL_AUDIO_FRAMESIZE(audio->spec);
+    } else if (!ondemand) {  // precache the audio data, so all decoding happens from a single buffer in RAM shared between tracks.
+        if ((audio->precache = SDL_LoadFile_IO(io, &audio->precachelen, false)) == NULL) {
+            goto failed;
+        }
+    }
+
+    if (ioclamp) {
+        SDL_CloseIO(ioclamp);  // IoClamp's close doesn't close the original stream, but we still need to free its resources here.
+        io = ioclamp = NULL;
     }
 
     if (closeio) {
@@ -954,33 +995,9 @@ MIX_Audio *MIX_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
         SDL_ClearProperty(audio->props, MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER);
     }
 
-    // set this before predecoding might change `decoder` to the RAW implementation.
-    SDL_SetStringProperty(audio->props, MIX_PROP_AUDIO_DECODER_STRING, decoder->name);
-
-    // if this is already raw data, predecoding is just going to make a copy of it, so skip it.
-    if (predecode && (decoder->decode != MIX_RAW_decode) && (duration_frames != MIX_DURATION_INFINITE)) {
-        size_t decoded_len = 0;
-        void *decoded = DecodeWholeFile(decoder, audio_userdata, &audio->spec, audio->props, &decoded_len);
-        if (!decoded) {
-            goto failed;
-        }
-        decoder->quit_audio(audio_userdata);
-        decoder = NULL;
-        audio_userdata = MIX_RAW_InitFromMemoryBuffer(decoded, decoded_len, &audio->spec, &duration_frames, true);
-        if (audio_userdata) {
-            decoder = &MIX_Decoder_RAW;
-        } else {
-            goto failed;
-        }
-    }
-
-    audio->decoder = decoder;
-    audio->decoder_userdata = audio_userdata;
-    audio->duration_frames = duration_frames;
-
-    if (duration_frames >= 0) {
-        SDL_SetNumberProperty(audio->props, MIX_PROP_METADATA_DURATION_FRAMES_NUMBER, duration_frames);
-    } else if (duration_frames == MIX_DURATION_INFINITE) {
+    if (audio->duration_frames >= 0) {
+        SDL_SetNumberProperty(audio->props, MIX_PROP_METADATA_DURATION_FRAMES_NUMBER, audio->duration_frames);
+    } else if (audio->duration_frames == MIX_DURATION_INFINITE) {
         SDL_SetBooleanProperty(audio->props, MIX_PROP_METADATA_DURATION_INFINITE_BOOLEAN, true);
     }
 
@@ -1002,14 +1019,17 @@ failed:
     }
 
     if (audio) {
+        if (audio->precache) {
+            SDL_free((void *) audio->precache);
+        }
         if (audio->props) {
             SDL_DestroyProperties(audio->props);
         }
         SDL_free(audio);
     }
 
-    if (io) {
-        SDL_CloseIO(io);  // IoClamp's close doesn't close the original stream, but we still need to free its resources here.
+    if (ioclamp) {
+        SDL_CloseIO(ioclamp);  // IoClamp's close doesn't close the original stream, but we still need to free its resources here.
     }
 
     if (origio && closeio) {
@@ -1079,8 +1099,10 @@ MIX_Audio *MIX_LoadRawAudio_IO(MIX_Mixer *mixer, SDL_IOStream *io, const SDL_Aud
     SDL_SetNumberProperty(props, MIX_PROP_DECODER_FORMAT_NUMBER, (Sint64) spec->format);
     SDL_SetNumberProperty(props, MIX_PROP_DECODER_CHANNELS_NUMBER, (Sint64) spec->channels);
     SDL_SetNumberProperty(props, MIX_PROP_DECODER_FREQ_NUMBER, (Sint64) spec->freq);
+    SDL_SetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_SKIP_METADATA_TAGS_BOOLEAN, true);
     SDL_SetPointerProperty(props, MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER, io);
     SDL_SetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_CLOSEIO_BOOLEAN, closeio);
+
     MIX_Audio *audio = MIX_LoadAudioWithProperties(props);
     SDL_DestroyProperties(props);
     return audio;
@@ -1104,46 +1126,31 @@ MIX_Audio *MIX_LoadRawAudioNoCopy(MIX_Mixer *mixer, const void *data, size_t dat
         return NULL;
     }
 
-    MIX_Audio *audio = (MIX_Audio *) SDL_calloc(1, sizeof (*audio));
+    SDL_IOStream *io = SDL_IOFromConstMem(data, datalen);
+    if (!io) {
+        return NULL;
+    }
+
+    const SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetPointerProperty(props, MIX_PROP_AUDIO_LOAD_PREFERRED_MIXER_POINTER, mixer);
+    SDL_SetStringProperty(props, MIX_PROP_AUDIO_DECODER_STRING, "RAW");
+    SDL_SetNumberProperty(props, MIX_PROP_DECODER_FORMAT_NUMBER, (Sint64) spec->format);
+    SDL_SetNumberProperty(props, MIX_PROP_DECODER_CHANNELS_NUMBER, (Sint64) spec->channels);
+    SDL_SetNumberProperty(props, MIX_PROP_DECODER_FREQ_NUMBER, (Sint64) spec->freq);
+    SDL_SetPointerProperty(props, MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER, io);
+    SDL_SetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_SKIP_METADATA_TAGS_BOOLEAN, true);
+    SDL_SetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_ONDEMAND_BOOLEAN, true);  // so it doesn't make a copy to precache
+    SDL_SetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_CLOSEIO_BOOLEAN, true);
+    MIX_Audio *audio = MIX_LoadAudioWithProperties(props);
+    SDL_DestroyProperties(props);
+
     if (!audio) {
         return NULL;
     }
 
-    audio->props = SDL_CreateProperties();
-    if (!audio->props) {
-        SDL_free(audio);
-        return NULL;
-    }
-
-    SDL_SetPointerProperty(audio->props, MIX_PROP_AUDIO_LOAD_PREFERRED_MIXER_POINTER, mixer);
-    SDL_SetStringProperty(audio->props, MIX_PROP_AUDIO_DECODER_STRING, "RAW");
-    SDL_SetNumberProperty(audio->props, MIX_PROP_DECODER_FORMAT_NUMBER, (Sint64) spec->format);
-    SDL_SetNumberProperty(audio->props, MIX_PROP_DECODER_CHANNELS_NUMBER, (Sint64) spec->channels);
-    SDL_SetNumberProperty(audio->props, MIX_PROP_DECODER_FREQ_NUMBER, (Sint64) spec->freq);
-
-    Sint64 duration_frames = MIX_DURATION_UNKNOWN;
-    audio->decoder_userdata = MIX_RAW_InitFromMemoryBuffer(data, datalen, spec, &duration_frames, free_when_done);
-    if (!audio->decoder_userdata) {
-        SDL_DestroyProperties(audio->props);
-        SDL_free(audio);
-        return NULL;
-    }
-
-    SDL_assert(duration_frames >= 0);
-    audio->duration_frames = duration_frames;
-    SDL_SetNumberProperty(audio->props, MIX_PROP_METADATA_DURATION_FRAMES_NUMBER, duration_frames);
-
-    audio->decoder = &MIX_Decoder_RAW;
-    SDL_copyp(&audio->spec, spec);
-    SDL_AtomicIncRef(&audio->refcount);
-
-    LockGlobal();
-    audio->next = all_audios;
-    if (all_audios) {
-        all_audios->prev = audio;
-    }
-    all_audios = audio;
-    UnlockGlobal();
+    audio->precache = data;
+    audio->precachelen = datalen;
+    audio->free_precache = free_when_done;
 
     return audio;
 }
@@ -1228,6 +1235,9 @@ static void UnrefAudio(MIX_Audio *audio)
         }
         if (audio->props) {
             SDL_DestroyProperties(audio->props);
+        }
+        if (audio->free_precache) {
+            SDL_free((void *) audio->precache);
         }
         SDL_free(audio);
     }
@@ -1343,6 +1353,13 @@ void MIX_DestroyTrack(MIX_Track *track)
     SDL_DestroyProperties(track->props);
     SDL_DestroyProperties(track->tags);
     SDL_free(track->input_buffer);
+    if (track->ioclamp.io) {  // if we applied an i/o clamp to the stream, close that unconditionally.
+        SDL_CloseIO(track->io);   // this is the clamp, not the actual stream.
+        track->io = track->ioclamp.io;  // this is the actual stream.
+    }
+    if (track->io && track->closeio) {
+        SDL_CloseIO(track->io);
+    }
     SDL_aligned_free(track);
 }
 
@@ -1358,11 +1375,13 @@ SDL_PropertiesID MIX_GetTrackProperties(MIX_Track *track)
     return track->props;
 }
 
-bool MIX_SetTrackAudio(MIX_Track *track, MIX_Audio *audio)
+static bool MIX_SetTrackAudio_internal(MIX_Track *track, MIX_Audio *audio, SDL_IOStream *io, bool closeio)
 {
-    if (!CheckTrackParam(track)) {
-        return false;
-    }
+    SDL_assert(CheckTrackParam(track));
+    SDL_assert(audio || !io);  // if audio==NULL, io must be NULL, too.
+    SDL_assert(io || !closeio);  // if io==NULL, closeio must be false.
+
+    SDL_IOStream *origio = io;
 
     SDL_AudioSpec spec;
     if (audio) {
@@ -1380,6 +1399,9 @@ bool MIX_SetTrackAudio(MIX_Track *track, MIX_Audio *audio)
         track->internal_stream = SDL_CreateAudioStream(&audio->spec, &spec);
         if (!track->internal_stream) {
             UnlockTrack(track);
+            if (closeio) {
+                SDL_CloseIO(io);
+            }
             return false;
         }
     }
@@ -1387,6 +1409,16 @@ bool MIX_SetTrackAudio(MIX_Track *track, MIX_Audio *audio)
     if (track->input_audio) {
         track->input_audio->decoder->quit_track(track->decoder_userdata);
         UnrefAudio(track->input_audio);
+        if (track->ioclamp.io) {  // if we applied an i/o clamp to the stream, close that unconditionally.
+            SDL_CloseIO(track->io);   // this is the clamp, not the actual stream.
+            track->io = track->ioclamp.io;  // this is the actual stream.
+        }
+        if (track->io && track->closeio) {
+            SDL_CloseIO(track->io);
+        }
+        SDL_zero(track->ioclamp);
+        track->io = NULL;
+        track->closeio = false;
     }
 
     track->input_audio = NULL;
@@ -1394,21 +1426,61 @@ bool MIX_SetTrackAudio(MIX_Track *track, MIX_Audio *audio)
 
     bool retval = true;
     if (audio) {
-        retval = audio->decoder->init_track(audio->decoder_userdata, &audio->spec, audio->props, &track->decoder_userdata);
+        if (audio->clamp_offset >= 0) {
+            SDL_IOStream *clampio = MIX_OpenIoClamp(&track->ioclamp, io);
+            if (!clampio) {
+                retval = false;
+            } else {
+                io = clampio;
+            }
+        }
+
         if (retval) {
-            RefAudio(audio);
-            SDL_SetAudioStreamFormat(track->internal_stream, &audio->spec, &spec);   // input is from decoded audio, output is to output_stream
-            SetTrackOutputStreamFormat(track, &spec);   // input is from internal_stream, output is to mixer->output_stream (or, if spatializing, to mixer->output_stream but mono).
-            track->input_audio = audio;
-            track->input_stream = track->internal_stream;
-            SDL_ClearAudioStream(track->input_stream);   // make sure that any extra buffered input from before is removed.
-            track->position = 0;
+            retval = audio->decoder->init_track(audio->decoder_userdata, io, &audio->spec, audio->props, &track->decoder_userdata);
+            if (!retval) {
+                if (track->ioclamp.io) {
+                    SDL_CloseIO(io);  // this was the IoClamp, not the real data stream.
+                    io = origio;
+                }
+            } else {
+                RefAudio(audio);
+                SDL_SetAudioStreamFormat(track->internal_stream, &audio->spec, &spec);   // input is from decoded audio, output is to output_stream
+                SetTrackOutputStreamFormat(track, &spec);   // input is from internal_stream, output is to mixer->output_stream (or, if spatializing, to mixer->output_stream but mono).
+                track->input_audio = audio;
+                track->input_stream = track->internal_stream;
+                SDL_ClearAudioStream(track->input_stream);   // make sure that any extra buffered input from before is removed.
+                track->position = 0;
+                track->io = io;
+                track->closeio = closeio;
+            }
         }
     }
 
     UnlockTrack(track);
 
+    if (!retval && closeio) {
+        SDL_CloseIO(origio);
+    }
+
     return retval;
+}
+
+bool MIX_SetTrackAudio(MIX_Track *track, MIX_Audio *audio)
+{
+    if (!CheckTrackParam(track)) {
+        return false;
+    }
+
+    SDL_IOStream *io = NULL;
+    if (audio) {
+        SDL_assert(audio->precache != NULL);  // external MIX_Audios shouldn't be able to get into a state where they aren't precached.
+        io = SDL_IOFromConstMem(audio->precache, audio->precachelen);
+        if (!io) {
+            return false;
+        }
+    }
+
+    return MIX_SetTrackAudio_internal(track, audio, io, io != NULL);
 }
 
 bool MIX_SetTrackAudioStream(MIX_Track *track, SDL_AudioStream *stream)
@@ -1423,6 +1495,16 @@ bool MIX_SetTrackAudioStream(MIX_Track *track, SDL_AudioStream *stream)
         track->input_audio->decoder->quit_track(track->decoder_userdata);
         UnrefAudio(track->input_audio);
         track->input_audio = NULL;
+        if (track->ioclamp.io) {  // if we applied an i/o clamp to the stream, close that unconditionally.
+            SDL_CloseIO(track->io);   // this is the clamp, not the actual stream.
+            track->io = track->ioclamp.io;  // this is the actual stream.
+        }
+        if (track->io && track->closeio) {
+            SDL_CloseIO(track->io);
+        }
+        SDL_zero(track->ioclamp);
+        track->io = NULL;
+        track->closeio = false;
         if (track->internal_stream) {
             SDL_ClearAudioStream(track->internal_stream);   // make sure that any extra buffered input is removed.
         }
@@ -1438,6 +1520,34 @@ bool MIX_SetTrackAudioStream(MIX_Track *track, SDL_AudioStream *stream)
     UnlockTrack(track);
 
     return true;
+}
+
+bool MIX_SetTrackIOStream(MIX_Track *track, SDL_IOStream *io, bool closeio)
+{
+    if (!CheckTrackParam(track)) {
+        return false;
+    } else if (!io) {
+        return SDL_InvalidParamError("io");
+    }
+
+    const SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetPointerProperty(props, MIX_PROP_AUDIO_LOAD_PREFERRED_MIXER_POINTER, track->mixer);
+    SDL_SetPointerProperty(props, MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER, io);
+    SDL_SetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_ONDEMAND_BOOLEAN, true);
+    MIX_Audio *audio = MIX_LoadAudioWithProperties(props);
+    SDL_DestroyProperties(props);
+    if (!audio) {
+        return false;
+    }
+
+    const bool retval = MIX_SetTrackAudio_internal(track, audio, io, closeio);
+
+    // Drop our reference to `audio` after the track accepts it, so when the track is
+    //  done with it, it'll unref it, and `audio` will be cleaned up. If the track failed
+    //  to accept the audio, this will clean it up right now.
+    UnrefAudio(audio);
+
+    return retval;
 }
 
 static void SDLCALL CleanupTagList(void *userdata, void *value)
@@ -1636,7 +1746,7 @@ MIX_Audio *MIX_GetTrackAudio(MIX_Track *track)
     MIX_Audio *retval = NULL;
     if (CheckTrackParam(track)) {
         LockTrack(track);
-        retval = track->input_audio;
+        retval = (track->input_audio && track->input_audio->precache) ? track->input_audio : NULL;  // don't allow access to the MIX_Audio if this was a temporary one created for MIX_SetTrackIOStream.
         UnlockTrack(track);
     }
     return retval;
@@ -2481,5 +2591,38 @@ SDL_IOStream *MIX_OpenIoClamp(MIX_IoClamp *clamp, SDL_IOStream *io)
     iface.seek = MIX_IoClamp_seek;
     iface.read = MIX_IoClamp_read;
     return SDL_OpenIO(&iface, clamp);
+}
+
+void *MIX_GetConstIOBuffer(SDL_IOStream *io, size_t *datalen)
+{
+    void *buffer = NULL;
+    const SDL_PropertiesID ioprops = SDL_GetIOProperties(io);
+    if (ioprops) {
+        buffer = SDL_GetPointerProperty(ioprops, SDL_PROP_IOSTREAM_MEMORY_POINTER, NULL);
+        if (!buffer) {
+            buffer = SDL_GetPointerProperty(ioprops, SDL_PROP_IOSTREAM_DYNAMIC_MEMORY_POINTER, NULL);
+        }
+    }
+
+    if (buffer) {  // we got a pointer to const memory?
+        *datalen = SDL_GetIOSize(io);
+    }
+    return buffer;
+}
+
+void *MIX_SlurpConstIO(SDL_IOStream *io, size_t *datalen, bool *copied)
+{
+    void *buffer = MIX_GetConstIOBuffer(io, datalen);
+    if (buffer) {  // we got a pointer to const memory?
+        *copied = false;
+    } else if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {   // no? Slurp the whole file in.
+        return NULL;
+    } else if ((buffer = SDL_LoadFile_IO(io, datalen, false)) == NULL) {
+        return NULL;
+    } else {
+        *copied = true;
+    }
+
+    return buffer;
 }
 

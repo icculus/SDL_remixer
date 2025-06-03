@@ -176,7 +176,13 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     //iopostmix = SDL_IOFromFile("postmix.raw", "wb"); if (iopostmix) { MIX_SetPostMixCallback(mixer, WritePostmixPCMCallback, iopostmix); }
 
     //const int chmap[] = { 1, 0 }; MIX_SetTrackOutputChannelMap(track, chmap, SDL_arraysize(chmap));
+    #if 1
     MIX_SetTrackAudio(track, audio);
+    #else
+    MIX_DestroyAudio(audio);
+    audio = NULL;
+    MIX_SetTrackIOStream(track, SDL_IOFromFile(argv[1], "rb"), true);
+    #endif
 
     SDL_PropertiesID options = SDL_CreateProperties();
     SDL_SetNumberProperty(options, MIX_PROP_PLAY_MAX_MILLISECONDS_NUMBER, 9440);
@@ -188,7 +194,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     SDL_DestroyProperties(options);
 
     // we cheat here with PlayAudio, since the sinewave decoder produces infinite audio.
-    MIX_PlayAudio(mixer, MIX_CreateSineWaveAudio(mixer, 300, 0.25f));
+    //MIX_PlayAudio(mixer, MIX_CreateSineWaveAudio(mixer, 300, 0.25f));
 
     return SDL_APP_CONTINUE;
 }

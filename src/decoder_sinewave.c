@@ -72,10 +72,11 @@ static bool SDLCALL SINEWAVE_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, S
 
     *duration_frames = MIX_DURATION_INFINITE;
     *audio_userdata = adata;
+
     return true;
 }
 
-static bool SDLCALL SINEWAVE_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
+static bool SDLCALL SINEWAVE_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
     SINEWAVE_TrackData *tdata = (SINEWAVE_TrackData *) SDL_calloc(1, sizeof (*tdata));
     if (!tdata) {

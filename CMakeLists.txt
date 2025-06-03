@@ -191,6 +191,10 @@ option(SDLMIXER_AIFF "Enable AIFF audio" ON)
 option(SDLMIXER_WAVE "Enable WAVE audio" ON)
 option(SDLMIXER_VOC "Enable VOC audio" ON)
 
+set(SDLMIXER_WAVE OFF)  # !!! FIXME: .WAV support needs to be rewritten for proper streaming.
+set(SDLMIXER_AIFF OFF)  # !!! FIXME: .AIFF support needs to be rewritten for proper streaming.
+set(SDLMIXER_VOC OFF)  # !!! FIXME: .VOC support needs to be rewritten for proper streaming.
+
 option(SDLMIXER_WAVPACK "Enable WavPack audio" ON)
 cmake_dependent_option(SDLMIXER_WAVPACK_DSD "Enable WavPack DSD audio support" OFF SDLMIXER_WAVPACK OFF)
 cmake_dependent_option(SDLMIXER_WAVPACK_SHARED "Dynamically load WavPack library" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_WAVPACK OFF)

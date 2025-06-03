@@ -48,8 +48,8 @@ struct xmp_callbacks {
 
 #define MIX_LOADER_FUNCTIONS \
     MIX_LOADER_FUNCTION(true,xmp_context,xmp_create_context,(void)) \
-    MIX_LOADER_FUNCTION(true,int,xmp_load_module_from_memory,(xmp_context, LIBXMP_CONST void *, long)) \
     MIX_LOADER_FUNCTION(false,int,xmp_test_module_from_callbacks,(void *, struct xmp_callbacks, struct xmp_test_info *)) \
+    MIX_LOADER_FUNCTION(true,int,xmp_load_module_from_callbacks,(xmp_context, void *, struct xmp_callbacks)) \
     MIX_LOADER_FUNCTION(true,int,xmp_start_player,(xmp_context, int, int)) \
     MIX_LOADER_FUNCTION(true,void,xmp_end_player,(xmp_context)) \
     MIX_LOADER_FUNCTION(true,void,xmp_get_module_info,(xmp_context, struct xmp_module_info *)) \
@@ -99,15 +99,8 @@ static bool SetLibXmpError(const char *function, int error)
     return SDL_SetError("%s: unknown error %d", function, error);
 }
 
-typedef struct XMP_AudioData
-{
-    const Uint8 *data;
-    size_t datalen;
-} XMP_AudioData;
-
 typedef struct XMP_TrackData
 {
-    const XMP_AudioData *adata;
     int freq;
     xmp_context ctx;
 } XMP_TrackData;
@@ -133,28 +126,21 @@ static bool SDLCALL XMP_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
         }
     }
 
-    // If we're still here, we either have valid data, or we're on libxmp < 4.5. In either case, just load the whole thing to RAM and see what happens.
+    // If we're still here, we either have valid data, or we're on libxmp < 4.5. In either case, just load the whole thing and see what happens.
 
-    // now rewind, load the whole thing to memory, and use that buffer for future processing.
+    // Go back and do a proper load now to get metadata.
     if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {
-        return false;
-    }
-    size_t datalen = 0;
-    Uint8 *data = (Uint8 *) SDL_LoadFile_IO(io, &datalen, false);
-    if (!data) {
         return false;
     }
 
     xmp_context ctx = libxmp.xmp_create_context();
     if (!ctx) {
-        SDL_free(data);
         return SDL_OutOfMemory();
     }
 
-    err = libxmp.xmp_load_module_from_memory(ctx, data, (long) datalen);
+    err = libxmp.xmp_load_module_from_callbacks(ctx, io, XMP_IoCallbacks);
     if (err) {
         libxmp.xmp_free_context(ctx);
-        SDL_free(data);
         return SetLibXmpError("xmp_load_module_from_memory", err);
     }
 
@@ -180,12 +166,11 @@ static bool SDLCALL XMP_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
         }
     }
 
-// !!! FIXME: is this necessary?
+    // !!! FIXME: is this necessary?
     err = libxmp.xmp_start_player(ctx, spec->freq, 0);  // start this running at device sample rate, so we can calculate total_time.
     if (err) {
         libxmp.xmp_release_module(ctx);
         libxmp.xmp_free_context(ctx);
-        SDL_free(data);
         return SetLibXmpError("xmp_start_player", err);
     }
 
@@ -199,27 +184,20 @@ static bool SDLCALL XMP_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
     libxmp.xmp_release_module(ctx);
     libxmp.xmp_free_context(ctx);
 
-    XMP_AudioData *adata = (XMP_AudioData *) SDL_calloc(1, sizeof (*adata));
-    if (!adata) {
-        SDL_free(data);
-        return false;
-    }
-
-    adata->data = data;
-    adata->datalen = datalen;
-
     // libxmp prefers to generate Sint16, stereo data.
     spec->format = SDL_AUDIO_S16;
     spec->channels = 2;
     // libxmp generates in whatever sample rate, so use the current device spec->freq.
 
-    *audio_userdata = adata;
+    *audio_userdata = NULL;  // no state.
 
     return true;
 }
 
-bool SDLCALL XMP_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
+bool SDLCALL XMP_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
+    SDL_assert(audio_userdata == NULL);  // no state.
+
     int err;
 
     XMP_TrackData *tdata = (XMP_TrackData *) SDL_calloc(1, sizeof (*tdata));
@@ -227,9 +205,6 @@ bool SDLCALL XMP_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL
         return false;
     }
 
-    const XMP_AudioData *adata = (const XMP_AudioData *) audio_userdata;
-
-    tdata->adata = adata;
     tdata->freq = spec->freq;
 
     tdata->ctx = libxmp.xmp_create_context();
@@ -238,7 +213,7 @@ bool SDLCALL XMP_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL
         return SDL_OutOfMemory();
     }
 
-    err = libxmp.xmp_load_module_from_memory(tdata->ctx, adata->data, (long) adata->datalen);
+    err = libxmp.xmp_load_module_from_callbacks(tdata->ctx, io, XMP_IoCallbacks);
     if (err) {
         libxmp.xmp_free_context(tdata->ctx);
         SDL_free(tdata);
@@ -297,9 +272,7 @@ void SDLCALL XMP_quit_track(void *track_userdata)
 
 void SDLCALL XMP_quit_audio(void *audio_userdata)
 {
-    XMP_AudioData *tdata = (XMP_AudioData *) audio_userdata;
-    SDL_free((void *) tdata->data);
-    SDL_free(tdata);
+    SDL_assert(audio_userdata == NULL);   // no state.
 }
 
 MIX_Decoder MIX_Decoder_XMP = {

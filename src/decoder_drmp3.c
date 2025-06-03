@@ -48,8 +48,6 @@
 
 typedef struct DRMP3_AudioData
 {
-    void *buffer;
-    size_t buflen;
     size_t framesize;
     drmp3_seek_point *seek_points;
     drmp3_uint32 num_seek_points;
@@ -86,32 +84,14 @@ static drmp3_bool32 DRMP3_IoTell(void *context, drmp3_int64 *pos)
 static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
     drmp3 decoder;
-    // do an initial load from the IOStream directly, so it can determine if this is really an MP3 file without
-    //  reading a lot of the stream into memory first.
+    // do an initial load from the IOStream to get metadata.
     if (!drmp3_init(&decoder, DRMP3_IoRead, DRMP3_IoSeek, DRMP3_IoTell, NULL, io, NULL)) {
         return false;  // probably not an MP3 file.
-    }
-    drmp3_uninit(&decoder);
-
-    // suck the whole thing into memory and work out of there from now on.
-    if (SDL_SeekIO(io, SDL_IO_SEEK_SET, 0) == -1) {
-        return false;
     }
 
     DRMP3_AudioData *adata = (DRMP3_AudioData *) SDL_calloc(1, sizeof(*adata));
     if (!adata) {
-        return false;
-    }
-
-    adata->buffer = SDL_LoadFile_IO(io, &adata->buflen, false);
-    if (!adata->buffer) {
-        SDL_free(adata);
-        return false;
-    }
-
-    if (!drmp3_init_memory(&decoder, adata->buffer, adata->buflen, NULL)) {
-        SDL_free(adata->buffer);
-        SDL_free(adata);
+        drmp3_uninit(&decoder);
         return false;
     }
 
@@ -153,7 +133,7 @@ static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_
     return true;
 }
 
-static bool SDLCALL DRMP3_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
+static bool SDLCALL DRMP3_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
     const DRMP3_AudioData *adata = (const DRMP3_AudioData *) audio_userdata;
     DRMP3_TrackData *tdata = (DRMP3_TrackData *) SDL_calloc(1, sizeof (*tdata));
@@ -161,7 +141,7 @@ static bool SDLCALL DRMP3_init_track(void *audio_userdata, const SDL_AudioSpec *
         return false;
     }
 
-    if (!drmp3_init_memory(&tdata->decoder, adata->buffer, adata->buflen, NULL)) {
+    if (!drmp3_init(&tdata->decoder, DRMP3_IoRead, DRMP3_IoSeek, DRMP3_IoTell, NULL, io, NULL)) {
         SDL_free(tdata);
         return false;
     }
@@ -206,7 +186,6 @@ static void SDLCALL DRMP3_quit_audio(void *audio_userdata)
 {
     DRMP3_AudioData *adata = (DRMP3_AudioData *) audio_userdata;
     SDL_free(adata->seek_points);
-    SDL_free(adata->buffer);
     SDL_free(adata);
 }
 

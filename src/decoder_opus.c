@@ -54,8 +54,6 @@
 
 typedef struct OPUS_AudioData
 {
-    const Uint8 *data;
-    size_t datalen;
     bool loop;
     Sint64 loop_start;
     Sint64 loop_end;
@@ -65,7 +63,6 @@ typedef struct OPUS_AudioData
 typedef struct OPUS_TrackData
 {
     const OPUS_AudioData *adata;
-    SDL_IOStream *io;  // a const-mem IOStream for accessing the adata's data.
     OggOpusFile *of;
     int current_channels;
     int current_bitstream;
@@ -133,7 +130,8 @@ static const OpusFileCallbacks OPUS_IoCallbacks = { OPUS_IoRead, OPUS_IoSeek, OP
 
 static bool SDLCALL OPUS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
-    // just load the bare minimum from the IOStream to verify it's an Ogg Vorbis file.
+    // just load the bare minimum from the IOStream to verify it's an Opus file.
+    // !!! FIXME: is op_open_callbacks going to return more slowly if this isn't an Opus file? It's probably better to just do the full open.
     int rc = 0;
     OggOpusFile *of = opus.op_test_callbacks(io, &OPUS_IoCallbacks, NULL, 0, &rc);
     if (!of) {
@@ -141,47 +139,25 @@ static bool SDLCALL OPUS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
     }
     opus.op_free(of);
 
-    // now rewind, load the whole thing to memory, and use that buffer for future processing.
+    // Go back and do a proper load now to get metadata.
     if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {
-        return false;
-    }
-    size_t datalen = 0;
-    Uint8 *data = (Uint8 *) SDL_LoadFile_IO(io, &datalen, false);
-    if (!data) {
         return false;
     }
 
     OPUS_AudioData *adata = (OPUS_AudioData *) SDL_calloc(1, sizeof (*adata));
     if (!adata) {
-        SDL_free(data);
         return false;
     }
 
-    adata->data = data;
-    adata->datalen = datalen;
-
-    io = SDL_IOFromConstMem(data, datalen);  // switch over to a memory IOStream.
-    if (!io) {  // uhoh.
-        SDL_free(data);
-        SDL_free(adata);
-        return false;
-    }
-
-    // now open the memory buffer for serious processing.
+    // now open the stream for serious processing.
     of = opus.op_open_callbacks(io, &OPUS_IoCallbacks, NULL, 0, &rc);
     if (!of) {
-        SDL_CloseIO(io);
-        SDL_free(data);
-        SDL_free(adata);
         return set_op_error("ov_open_callbacks", rc);
     }
 
     const OpusHead *info = opus.op_head(of, -1);
     if (!info) {
         opus.op_free(of);
-        SDL_CloseIO(io);
-        SDL_free(data);
-        SDL_free(adata);
         return SDL_SetError("Couldn't get Opus info; corrupt data?");
     }
 
@@ -197,8 +173,7 @@ static bool SDLCALL OPUS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
     opus.op_raw_seek(of, 0);  // !!! FIXME: it's not clear if this seek is necessary, but https://stackoverflow.com/a/72482773 suggests it might be, at least on older libvorbisfile releases...
     const Sint64 full_length = (Sint64) opus.op_pcm_total(of, -1);
     adata->loop = ((adata->loop_end > 0) && (adata->loop_end <= full_length) && (adata->loop_start < adata->loop_end));
-    opus.op_free(of);  // done with this instance. Tracks will maintain their own OggVorbis_File object.
-    SDL_CloseIO(io);  // close our memory i/o.
+    opus.op_free(of);  // done with this instance. Tracks will maintain their own OggOpusFile object.
 
     *duration_frames = adata->loop ? MIX_DURATION_INFINITE : full_length;  // if looping, stream is infinite.
     *audio_userdata = adata;
@@ -206,7 +181,7 @@ static bool SDLCALL OPUS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
     return true;
 }
 
-bool SDLCALL OPUS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
+bool SDLCALL OPUS_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
     OPUS_TrackData *tdata = (OPUS_TrackData *) SDL_calloc(1, sizeof (*tdata));
     if (!tdata) {
@@ -215,17 +190,10 @@ bool SDLCALL OPUS_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SD
 
     const OPUS_AudioData *adata = (const OPUS_AudioData *) audio_userdata;
 
-    tdata->io = SDL_IOFromConstMem(adata->data, adata->datalen);
-    if (!tdata->io) {  // uhoh.
-        SDL_free(tdata);
-        return false;
-    }
-
-    // now open the memory buffer for serious processing.
+    // now open the stream for serious processing.
     int rc = 0;
-    tdata->of = opus.op_open_callbacks(tdata->io, &OPUS_IoCallbacks, NULL, 0, &rc);
+    tdata->of = opus.op_open_callbacks(io, &OPUS_IoCallbacks, NULL, 0, &rc);
     if (!tdata->of) {
-        SDL_CloseIO(tdata->io);
         SDL_free(tdata);
         return set_op_error("op_open_callbacks", rc);
     }
@@ -284,15 +252,13 @@ void SDLCALL OPUS_quit_track(void *track_userdata)
 {
     OPUS_TrackData *tdata = (OPUS_TrackData *) track_userdata;
     opus.op_free(tdata->of);
-    SDL_CloseIO(tdata->io);
     SDL_free(tdata);
 }
 
 void SDLCALL OPUS_quit_audio(void *audio_userdata)
 {
-    OPUS_AudioData *tdata = (OPUS_AudioData *) audio_userdata;
-    SDL_free((void *) tdata->data);
-    SDL_free(tdata);
+    OPUS_AudioData *adata = (OPUS_AudioData *) audio_userdata;
+    SDL_free(adata);
 }
 
 MIX_Decoder MIX_Decoder_OPUS = {

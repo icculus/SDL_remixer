@@ -276,8 +276,6 @@ static void decimation_reset(void *context)
 
 typedef struct WAVPACK_AudioData
 {
-    const Uint8 *data;
-    size_t datalen;
     const Uint8 *wvcdata;
     size_t wvcdatalen;
     int64_t numsamples;
@@ -292,7 +290,7 @@ typedef struct WAVPACK_AudioData
 typedef struct WAVPACK_TrackData
 {
     const WAVPACK_AudioData *adata;
-    SDL_IOStream *io;  // a const-mem IOStream for accessing the adata's data.
+    SDL_IOStream *io;  // an IOStream for accessing the .wv file data.
     SDL_IOStream *wvcio;  // a const-mem IOStream for accessing the adata's correction data.
     WavpackContext *ctx;
     void *decimation_ctx;
@@ -359,18 +357,13 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
         return SDL_SetError("Not a WavPack file.");
     }
 
-    // now rewind, load the whole thing to memory, and use that buffer for future processing.
+    // Go back and do a proper load now to get metadata.
     if (SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) < 0) {
         if (wvcio && closewvcio) { SDL_CloseIO(wvcio); }
         return false;
     }
-    size_t datalen = 0;
-    Uint8 *data = (Uint8 *) SDL_LoadFile_IO(io, &datalen, false);
-    if (!data) {
-        if (wvcio && closewvcio) { SDL_CloseIO(wvcio); }
-        return false;
-    }
 
+    // !!! FIXME: it would be better to not pull this all in upfront; move the thing where we decide how to access the data to a common place, make an IOStream per-track.
     size_t wvcdatalen = 0;
     Uint8 *wvcdata = NULL;
     if (wvcio) {
@@ -379,7 +372,6 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
             SDL_CloseIO(wvcio);
         }
         if (!wvcdata) {
-            SDL_free(data);
             return false;
         }
     }
@@ -387,11 +379,6 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
     WavpackContext *ctx = NULL;
     WAVPACK_AudioData *adata = (WAVPACK_AudioData *) SDL_calloc(1, sizeof (*adata));
     if (!adata) {
-        goto failed;
-    }
-
-    io = SDL_IOFromConstMem(data, datalen);  // switch over to a memory IOStream.
-    if (!io) {  // uhoh.
         goto failed;
     }
 
@@ -411,8 +398,6 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
         goto failed;
     }
 
-    adata->data = data;
-    adata->datalen = datalen;
     adata->wvcdata = wvcdata;
     adata->wvcdatalen = wvcdatalen;
     adata->numsamples = wavpack.WavpackGetNumSamples64 ? wavpack.WavpackGetNumSamples64(ctx) : wavpack.WavpackGetNumSamples(ctx);
@@ -461,7 +446,6 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
     // calls from in here.
 
     wavpack.WavpackCloseFile(ctx);
-    SDL_CloseIO(io);  // close our memory i/o.
     SDL_CloseIO(wvcio);  // close our memory i/o.
 
     *duration_frames = (Sint64) adata->numsamples;
@@ -472,14 +456,12 @@ static bool SDLCALL WAVPACK_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SD
 failed:
     if (ctx) { wavpack.WavpackCloseFile(ctx); }
     SDL_CloseIO(wvcio);
-    SDL_CloseIO(io);
     SDL_free(wvcdata);
-    SDL_free(data);
     SDL_free(adata);
     return false;
 }
 
-bool SDLCALL WAVPACK_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
+bool SDLCALL WAVPACK_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
     WAVPACK_TrackData *tdata = (WAVPACK_TrackData *) SDL_calloc(1, sizeof (*tdata));
     if (!tdata) {
@@ -489,11 +471,6 @@ bool SDLCALL WAVPACK_init_track(void *audio_userdata, const SDL_AudioSpec *spec,
     const WAVPACK_AudioData *adata = (const WAVPACK_AudioData *) audio_userdata;
 
     char err[80];
-
-    tdata->io = SDL_IOFromConstMem(adata->data, adata->datalen);
-    if (!tdata->io) {  // uhoh.
-        goto failed;
-    }
 
     if (adata->wvcdata) {
         tdata->wvcio = SDL_IOFromConstMem(adata->wvcdata, adata->wvcdatalen);
@@ -509,8 +486,8 @@ bool SDLCALL WAVPACK_init_track(void *audio_userdata, const SDL_AudioSpec *spec,
 
     // now open the memory buffers for serious processing.
     tdata->ctx = (wavpack.WavpackOpenFileInputEx64 != NULL) ?
-                wavpack.WavpackOpenFileInputEx64(&WAVPACK_IoReader64, tdata->io, tdata->wvcio, err, OPEN_NORMALIZE|OPEN_TAGS|FLAGS_DSD, 0) :
-                wavpack.WavpackOpenFileInputEx(&WAVPACK_IoReader32, tdata->io, tdata->wvcio, err, OPEN_NORMALIZE|OPEN_TAGS, 0);
+                wavpack.WavpackOpenFileInputEx64(&WAVPACK_IoReader64, io, tdata->wvcio, err, OPEN_NORMALIZE|OPEN_TAGS|FLAGS_DSD, 0) :
+                wavpack.WavpackOpenFileInputEx(&WAVPACK_IoReader32, io, tdata->wvcio, err, OPEN_NORMALIZE|OPEN_TAGS, 0);
 
     if (!tdata->ctx) {
         goto failed;
@@ -527,7 +504,6 @@ failed:
         SDL_assert(tdata->ctx == NULL);
         SDL_free(tdata->decode_buffer);
         SDL_CloseIO(tdata->wvcio);
-        SDL_CloseIO(tdata->io);
         SDL_free(tdata);
     }
     return false;
@@ -609,7 +585,6 @@ void SDLCALL WAVPACK_quit_track(void *track_userdata)
     #endif
 
     wavpack.WavpackCloseFile(tdata->ctx);
-    SDL_CloseIO(tdata->io);
     SDL_CloseIO(tdata->wvcio);
     SDL_free(tdata->decode_buffer);
     SDL_free(tdata);
@@ -617,10 +592,9 @@ void SDLCALL WAVPACK_quit_track(void *track_userdata)
 
 void SDLCALL WAVPACK_quit_audio(void *audio_userdata)
 {
-    WAVPACK_AudioData *tdata = (WAVPACK_AudioData *) audio_userdata;
-    SDL_free((void *) tdata->data);
-    SDL_free((void *) tdata->wvcdata);
-    SDL_free(tdata);
+    WAVPACK_AudioData *adata = (WAVPACK_AudioData *) audio_userdata;
+    SDL_free((void *) adata->wvcdata);
+    SDL_free(adata);
 }
 
 MIX_Decoder MIX_Decoder_WAVPACK = {

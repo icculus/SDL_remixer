@@ -43,11 +43,8 @@
 #include "dr_libs/dr_flac.h"
 
 
-
 typedef struct DRFLAC_AudioData
 {
-    void *buffer;
-    size_t buflen;
     size_t framesize;
     bool loop;
     Sint64 loop_start;
@@ -61,10 +58,6 @@ typedef struct DRFLAC_TrackData
     drflac *decoder;
 } DRFLAC_TrackData;
 
-
-// the i/o callbacks are only used for initial open, so it can read as little
-//  as possible to verify it's really a FLAC file. After we're sure it is, we
-//  pull the whole thing into RAM.
 
 static size_t DRFLAC_IoRead(void *context, void *buf, size_t size)
 {
@@ -93,10 +86,17 @@ static void FreeMetadata(DRFLAC_Metadata *metadata)
     SDL_free(metadata->vendor);
 }
 
+
+#define MIX_PROP_DRFLAC_METADATA_POINTER "SDL_mixer.decoder_drflac.metadata"
+
 static void DRFLAC_OnMetadata(void *context, drflac_metadata *pMetadata)
 {
     if (pMetadata->type == DRFLAC_METADATA_BLOCK_TYPE_VORBIS_COMMENT) {
-        DRFLAC_Metadata *metadata = (DRFLAC_Metadata *) context;
+        SDL_IOStream *io = (SDL_IOStream *) context;
+        DRFLAC_Metadata *metadata = (DRFLAC_Metadata *) SDL_GetPointerProperty(SDL_GetIOProperties(io), MIX_PROP_DRFLAC_METADATA_POINTER, NULL);
+        if (!metadata) {
+            return;  // oh well.
+        }
 
         if (!metadata->vendor) {
             metadata->vendor = (char *) SDL_malloc(pMetadata->data.vorbis_comment.vendorLength + 1);
@@ -128,38 +128,35 @@ static void DRFLAC_OnMetadata(void *context, drflac_metadata *pMetadata)
 
 static bool SDLCALL DRFLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
-    // do an initial load from the IOStream directly, so it can determine if this is really a FLAC file without
-    //  reading a lot of the stream into memory first.
-    drflac *decoder = drflac_open(DRFLAC_IoRead, DRFLAC_IoSeek, io, NULL);
-    if (!decoder) {
-        return false;  // probably not a FLAC file.
+    // just load the bare minimum from the IOStream to verify it's a FLAC file (if it's an Ogg stream, we'll let libFLAC try to parse it out).
+    //bool is_ogg_stream = false;
+    char magic[4];
+    if (SDL_ReadIO(io, magic, 4) != 4) {
+        return false;
+    } else if (SDL_memcmp(magic, "OggS", 4) == 0) {
+        //is_ogg_stream = true;  // MAYBE flac, might be vorbis, etc.
+    } else if (SDL_memcmp(magic, "fLaC", 4) != 0) {
+        return SDL_SetError("Not a FLAC audio stream");
     }
-    drflac_close(decoder);
 
-    // suck the whole thing into memory and work out of there from now on.
+    // Go back and do a proper load now to get metadata.
     if (SDL_SeekIO(io, SDL_IO_SEEK_SET, 0) == -1) {
         return false;
     }
 
-    DRFLAC_AudioData *adata = (DRFLAC_AudioData *) SDL_calloc(1, sizeof(*adata));
-    if (!adata) {
-        return false;
-    }
-
-    adata->buffer = SDL_LoadFile_IO(io, &adata->buflen, false);
-    if (!adata->buffer) {
-        SDL_free(adata);
-        return false;
-    }
-
+    // open upfront to make sure data is usable and pull in metadata.
     DRFLAC_Metadata metadata;
     SDL_zero(metadata);
-
-    decoder = drflac_open_memory_with_metadata(adata->buffer, adata->buflen, DRFLAC_OnMetadata, &metadata, NULL);
+    SDL_SetPointerProperty(SDL_GetIOProperties(io), MIX_PROP_DRFLAC_METADATA_POINTER, &metadata);  // need to hang this pointer somewhere, just during init_audio.
+    drflac *decoder = drflac_open_with_metadata(DRFLAC_IoRead, DRFLAC_IoSeek, DRFLAC_OnMetadata, io, NULL);
     if (!decoder) {
-        FreeMetadata(&metadata);
-        SDL_free(adata->buffer);
-        SDL_free(adata);
+        return false;  // probably not a FLAC file.
+    }
+
+    DRFLAC_AudioData *adata = (DRFLAC_AudioData *) SDL_calloc(1, sizeof(*adata));
+    if (!adata) {
+        drflac_close(decoder);
+        SDL_ClearProperty(SDL_GetIOProperties(io), MIX_PROP_DRFLAC_METADATA_POINTER);
         return false;
     }
 
@@ -178,6 +175,7 @@ static bool SDLCALL DRFLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
     }
 
     drflac_close(decoder);
+    SDL_ClearProperty(SDL_GetIOProperties(io), MIX_PROP_DRFLAC_METADATA_POINTER);
 
     adata->framesize = SDL_AUDIO_FRAMESIZE(*spec);
 
@@ -186,7 +184,7 @@ static bool SDLCALL DRFLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
     return true;
 }
 
-static bool SDLCALL DRFLAC_init_track(void *audio_userdata, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
+static bool SDLCALL DRFLAC_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **track_userdata)
 {
     const DRFLAC_AudioData *adata = (const DRFLAC_AudioData *) audio_userdata;
     DRFLAC_TrackData *tdata = (DRFLAC_TrackData *) SDL_calloc(1, sizeof (*tdata));
@@ -194,7 +192,7 @@ static bool SDLCALL DRFLAC_init_track(void *audio_userdata, const SDL_AudioSpec 
         return false;
     }
 
-    tdata->decoder = drflac_open_memory(adata->buffer, adata->buflen, NULL);
+    tdata->decoder = drflac_open(DRFLAC_IoRead, DRFLAC_IoSeek, io, NULL);
     if (!tdata->decoder) {
         SDL_free(tdata);
         return false;
@@ -235,7 +233,6 @@ static void SDLCALL DRFLAC_quit_track(void *track_userdata)
 static void SDLCALL DRFLAC_quit_audio(void *audio_userdata)
 {
     DRFLAC_AudioData *adata = (DRFLAC_AudioData *) audio_userdata;
-    SDL_free(adata->buffer);
     SDL_free(adata);
 }
 
