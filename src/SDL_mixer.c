@@ -977,8 +977,9 @@ MIX_Audio *MIX_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
         if (!audio->precache) {
             goto failed;
         }
-        decoder->quit_audio(audio_userdata);
+        audio->free_precache = true;
 
+        decoder->quit_audio(audio_userdata);
         decoder = audio->decoder = &MIX_Decoder_RAW;
         audio_userdata = audio->decoder_userdata = NULL;  // no audio_userdata state in the RAW decoder (so we can cheat here and not do a full init_audio().)
         audio->duration_frames = audio->precachelen / SDL_AUDIO_FRAMESIZE(audio->spec);
