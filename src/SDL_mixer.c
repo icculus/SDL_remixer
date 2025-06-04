@@ -1430,12 +1430,14 @@ static bool MIX_SetTrackAudio_internal(MIX_Track *track, MIX_Audio *audio, SDL_I
 
     bool retval = true;
     if (audio) {
-        if (audio->clamp_offset >= 0) {
+        if (audio->clamp_offset >= 0) {   // clamp i/o so decoders don't see ID3 tags, etc.
             SDL_IOStream *clampio = MIX_OpenIoClamp(&track->ioclamp, io);
             if (!clampio) {
                 retval = false;
             } else {
                 io = clampio;
+                track->ioclamp.start = audio->clamp_offset;
+                track->ioclamp.length = audio->clamp_length;
             }
         }
 
