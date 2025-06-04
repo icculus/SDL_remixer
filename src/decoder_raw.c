@@ -94,6 +94,7 @@ bool SDLCALL RAW_decode(void *track_userdata, SDL_AudioStream *stream)
             return false;  // nothing else to read.
         }
         SDL_PutAudioStreamDataNoCopy(stream, tdata->const_data + tdata->position, readlen, NULL, NULL);
+        tdata->position += readlen;
     } else {
         const size_t readlen = sizeof (buffer) - (sizeof (buffer) % tdata->framesize);
         size_t br = SDL_ReadIO(tdata->io, buffer, readlen);
@@ -102,6 +103,7 @@ bool SDLCALL RAW_decode(void *track_userdata, SDL_AudioStream *stream)
             return false;  // eof or error, can't supply more data.
         }
         SDL_PutAudioStreamData(stream, buffer, br);
+        tdata->position += br;
     }
 
     return true;
