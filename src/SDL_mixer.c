@@ -234,7 +234,7 @@ static void TrackStopped(MIX_Track *track)
     }
 }
 
-static void ApplyFade(MIX_Track *track, float *pcm, int frames)
+static void ApplyFade(MIX_Track *track, int channels, float *pcm, int frames)
 {
     // !!! FIXME: this is probably pretty naive.
 
@@ -250,7 +250,6 @@ static void ApplyFade(MIX_Track *track, float *pcm, int frames)
     const float pctmult = (track->fade_direction < 0) ? 1.0f : -1.0f;
     const float pctsub = (track->fade_direction < 0) ? 1.0f : 0.0f;
     const float ftotal_fade_frames = (float) total_fade_frames;
-    const int channels = track->output_spec.channels;
 
     for (int i = 0; i < to_be_faded; i++) {
         const float pct = (pctsub - (((float) fade_frame_position) / ftotal_fade_frames)) * pctmult;
@@ -303,11 +302,10 @@ static bool DecodeMore(MIX_Track *track, int bytes_needed)
     return retval;
 }
 
-static int FillSilenceFrames(MIX_Track *track, void *buffer, int buflen)
+static int FillSilenceFrames(MIX_Track *track, void *buffer, int channels, int buflen)
 {
     SDL_assert(track->silence_frames > 0);
     SDL_assert(buflen > 0);
-    const int channels = track->output_spec.channels;
     const int max_silence_bytes = (int) (track->silence_frames * channels * sizeof (float));
     const int br = SDL_min(buflen, max_silence_bytes);
     if (br) {
@@ -335,6 +333,11 @@ static void SDLCALL TrackGetCallback(void *userdata, SDL_AudioStream *stream, in
     SDL_assert(track->output_spec.format == SDL_AUDIO_F32);
     SDL_assert(track->output_spec.freq == track->mixer->spec.freq);
 
+    SDL_AudioSpec raw_spec;
+    if (track->input_stream) {
+        SDL_GetAudioStreamFormat(track->input_stream, NULL, &raw_spec);
+    }
+
     // do we need to grow our buffer?
     if (additional_amount > track->input_buffer_len) {
         void *ptr = SDL_realloc(track->input_buffer, additional_amount);
@@ -360,7 +363,8 @@ static void SDLCALL TrackGetCallback(void *userdata, SDL_AudioStream *stream, in
         bytes_remaining = SDL_max(bytes_remaining, output_framesize);
 
         if (track->silence_frames > 0) {
-            br = FillSilenceFrames(track, pcm, bytes_remaining);
+            SDL_assert(track->input_stream != NULL);  // should have data bound if you landed here (we need raw_spec to be initialized).
+            br = FillSilenceFrames(track, pcm, raw_spec.channels, bytes_remaining);
         } else if (track->input_stream) {
             if (track->input_audio) {
                 DecodeMore(track, bytes_remaining);
@@ -392,26 +396,26 @@ static void SDLCALL TrackGetCallback(void *userdata, SDL_AudioStream *stream, in
                 }
             }
 
-            const int channels = track->output_spec.channels;
+            const int raw_channels = raw_spec.channels;
 
-            int frames_read = br / (sizeof (float) * channels);
+            int frames_read = br / (sizeof (float) * raw_channels);
             if (maxpos >= 0) {
                 const Uint64 newpos = track->position + frames_read;
                 if (newpos >= maxpos) {  // we read past the end of the fade out or maxframes, we need to clamp.
-                    br -= ((newpos - maxpos) * channels) * sizeof (float);
-                    frames_read = br / (sizeof (float) * channels);
+                    br -= ((newpos - maxpos) * raw_channels) * sizeof (float);
+                    frames_read = br / (sizeof (float) * raw_channels);
                     end_of_audio = true;
                 }
             }
 
             // give the app a shot at the final buffer before sending it on through transformations.
-            const int samples = frames_read * channels;
+            const int samples = frames_read * raw_channels;
 
             if (track->raw_callback) {
-                track->raw_callback(track->raw_callback_userdata, track, &track->output_spec, pcm, samples);
+                track->raw_callback(track->raw_callback_userdata, track, &raw_spec, pcm, samples);
             }
 
-            ApplyFade(track, pcm, frames_read);
+            ApplyFade(track, raw_channels, pcm, frames_read);
 
             const int put_bytes = samples * sizeof (float);
             SDL_PutAudioStreamData(stream, pcm, put_bytes);
