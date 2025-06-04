@@ -332,6 +332,9 @@ static void SDLCALL TrackGetCallback(void *userdata, SDL_AudioStream *stream, in
         return;  // paused or stopped, don't make progress.
     }
 
+    SDL_assert(track->output_spec.format == SDL_AUDIO_F32);
+    SDL_assert(track->output_spec.freq == mixer->spec.freq);
+
     // do we need to grow our buffer?
     if (additional_amount > track->input_buffer_len) {
         void *ptr = SDL_realloc(track->input_buffer, additional_amount);
@@ -519,9 +522,6 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
         int group_bytes = 0;
         MIX_Track *next_track = NULL;
         for (MIX_Track *track = group->tracks; track; track = next_track) {
-            SDL_assert(track->output_spec.format == SDL_AUDIO_F32);
-            SDL_assert(track->output_spec.freq == mixer->spec.freq);
-
             next_track = track->group_next;  // this won't save you from a callback going totally rogue, but it'll deal with the current track leaving the group.
             const int to_be_read = (additional_amount / SDL_AUDIO_FRAMESIZE(mixer->spec)) * SDL_AUDIO_FRAMESIZE(track->output_spec);
             const int br = SDL_GetAudioStreamData(track->output_stream, getbuf, to_be_read);
