@@ -195,8 +195,8 @@ static float calculate_distance_attenuation(const float distance)
     return 1.0f / (1.0f + (SDL_max(distance, 1.0f) - 1.0f));
 }
 
-static const float listener_at[4] SDL_ALIGNED(16) = { 0.0f, 0.0, -1.0f, 0.0f };  // default "at" for OpenAL listener orientation matrix.
-static const float listener_up[4] SDL_ALIGNED(16) = { 0.0f, 1.0, 0.0f, 0.0f };  // default "up" for OpenAL listener orientation matrix.
+static const float SDL_ALIGNED(16) listener_at[4] = { 0.0f, 0.0, -1.0f, 0.0f };  // default "at" for OpenAL listener orientation matrix.
+static const float SDL_ALIGNED(16) listener_up[4] = { 0.0f, 1.0, 0.0f, 0.0f };  // default "up" for OpenAL listener orientation matrix.
 
 
 #if SDL_MIXER_NEED_SCALAR_FALLBACK

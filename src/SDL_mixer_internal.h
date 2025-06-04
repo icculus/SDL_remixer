@@ -129,7 +129,7 @@ struct MIX_Audio
 
 struct MIX_Track
 {
-    float position3d[4] SDL_ALIGNED(16);   // we only need the X, Y, and Z coords, but the 4th element makes this SIMD-friendly.
+    float SDL_ALIGNED(16) position3d[4];   // we only need the X, Y, and Z coords, but the 4th element makes this SIMD-friendly.
     bool spatialized;
     float spatialization_panning[2];
     int spatialization_speakers[2];
