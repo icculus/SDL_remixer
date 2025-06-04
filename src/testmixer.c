@@ -8,7 +8,8 @@
 //static SDL_Window *window = NULL;
 //static SDL_Renderer *renderer = NULL;
 static MIX_Mixer *mixer = NULL;
-static MIX_Track *track = NULL;
+static MIX_Track *track1 = NULL;
+static MIX_Track *track2 = NULL;
 
 #if USE_MIX_GENERATE
 static SDL_IOStream *io = NULL;
@@ -94,8 +95,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     const SDL_AudioSpec spec = { SDL_AUDIO_S16, 2, 48000 };
 #endif
 
-    if (argc != 2) {
-        SDL_Log("USAGE: %s <file_to_play>", argv[0]);
+    if (argc != 3) {
+        SDL_Log("USAGE: %s <file_to_play1> <file_to_play2>", argv[0]);
         return SDL_APP_FAILURE;
     } else if (!SDL_Init(SDL_INIT_VIDEO)) {   // it's safe to SDL_INIT_AUDIO, but MIX_Init will do it for us.
         SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
@@ -169,28 +170,32 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     }
     SDL_Log("%s", "");
 
-    track = MIX_CreateTrack(mixer);
+    track1 = MIX_CreateTrack(mixer);
+    track2 = MIX_CreateTrack(mixer);
 
-    //ioraw = SDL_IOFromFile("trackraw.raw", "wb"); if (ioraw) { MIX_SetTrackRawCallback(track, WritePCMCallback, ioraw); }
-    //iocooked = SDL_IOFromFile("trackcooked.raw", "wb"); if (iocooked) { MIX_SetTrackCookedCallback(track, WritePCMCallback, iocooked); }
+    //ioraw = SDL_IOFromFile("trackraw.raw", "wb"); if (ioraw) { MIX_SetTrackRawCallback(track1, WritePCMCallback, ioraw); }
+    //iocooked = SDL_IOFromFile("trackcooked.raw", "wb"); if (iocooked) { MIX_SetTrackCookedCallback(track1, WritePCMCallback, iocooked); }
     //iopostmix = SDL_IOFromFile("postmix.raw", "wb"); if (iopostmix) { MIX_SetPostMixCallback(mixer, WritePostmixPCMCallback, iopostmix); }
+    (void) WritePostmixPCMCallback;  // stop a compiler warning when not using the callbacks.
 
-    //const int chmap[] = { 1, 0 }; MIX_SetTrackOutputChannelMap(track, chmap, SDL_arraysize(chmap));
-    #if 1
-    MIX_SetTrackAudio(track, audio);
-    #else
-    MIX_DestroyAudio(audio);
-    audio = NULL;
-    MIX_SetTrackIOStream(track, SDL_IOFromFile(argv[1], "rb"), true);
-    #endif
+    //const int chmap[] = { 1, 0 }; MIX_SetTrackOutputChannelMap(track1, chmap, SDL_arraysize(chmap));
+    MIX_SetTrackAudio(track1, audio);
+    MIX_SetTrackIOStream(track2, SDL_IOFromFile(argv[2], "rb"), true);
 
-    SDL_PropertiesID options = SDL_CreateProperties();
+    SDL_PropertiesID options;
+
+    options = SDL_CreateProperties();
     SDL_SetNumberProperty(options, MIX_PROP_PLAY_MAX_MILLISECONDS_NUMBER, 9440);
     SDL_SetNumberProperty(options, MIX_PROP_PLAY_LOOPS_NUMBER, 3);
     SDL_SetNumberProperty(options, MIX_PROP_PLAY_LOOP_START_MILLISECOND_NUMBER, 6097);
     SDL_SetNumberProperty(options, MIX_PROP_PLAY_FADE_IN_MILLISECONDS_NUMBER, 30000);
     SDL_SetNumberProperty(options, MIX_PROP_PLAY_APPEND_SILENCE_MILLISECONDS_NUMBER, 30000);
-    MIX_PlayTrack(track, options);
+    MIX_PlayTrack(track1, options);
+    SDL_DestroyProperties(options);
+
+    options = SDL_CreateProperties();
+    SDL_SetNumberProperty(options, MIX_PROP_PLAY_LOOPS_NUMBER, -1);
+    MIX_PlayTrack(track2, options);
     SDL_DestroyProperties(options);
 
     // we cheat here with PlayAudio, since the sinewave decoder produces infinite audio.
@@ -227,12 +232,12 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     static float prev_ratio = 1.0f;
     if (ratio != prev_ratio) {
         SDL_Log("new frequency ratio: %f", ratio);
-        MIX_SetTrackFrequencyRatio(track, ratio);
+        MIX_SetTrackFrequencyRatio(track1, ratio);
         prev_ratio = ratio;
     }
     #endif
 
-    return MIX_TrackPlaying(track) ? SDL_APP_CONTINUE : SDL_APP_SUCCESS;
+    return MIX_TrackPlaying(track1) ? SDL_APP_CONTINUE : SDL_APP_SUCCESS;
 }
 
 void SDL_AppQuit(void *appstate, SDL_AppResult result)
