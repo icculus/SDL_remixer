@@ -333,7 +333,7 @@ static void SDLCALL TrackGetCallback(void *userdata, SDL_AudioStream *stream, in
     }
 
     SDL_assert(track->output_spec.format == SDL_AUDIO_F32);
-    SDL_assert(track->output_spec.freq == mixer->spec.freq);
+    SDL_assert(track->output_spec.freq == track->mixer->spec.freq);
 
     // do we need to grow our buffer?
     if (additional_amount > track->input_buffer_len) {
