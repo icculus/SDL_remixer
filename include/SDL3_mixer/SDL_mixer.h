@@ -47,29 +47,60 @@ typedef struct MIX_Audio MIX_Audio;
 typedef struct MIX_Track MIX_Track;
 typedef struct MIX_Group MIX_Group;
 
-
-#define SDL_MIXER_MAJOR_VERSION 3
-#define SDL_MIXER_MINOR_VERSION 0
-#define SDL_MIXER_MICRO_VERSION 0
-
-/** This is the version number macro for the current SDL_mixer version. */
-#define SDL_MIXER_VERSION \
-    SDL_VERSIONNUM(SDL_MIXER_MAJOR_VERSION, SDL_MIXER_MINOR_VERSION, SDL_MIXER_MICRO_VERSION)
-
-/** This macro will evaluate to true if compiled with SDL_mixer at least X.Y.Z. */
-#define SDL_MIXER_VERSION_ATLEAST(X, Y, Z) \
-    ((SDL_MIXER_MAJOR_VERSION >= X) && \
-     (SDL_MIXER_MAJOR_VERSION > X || SDL_MIXER_MINOR_VERSION >= Y) && \
-     (SDL_MIXER_MAJOR_VERSION > X || SDL_MIXER_MINOR_VERSION > Y || SDL_MIXER_MICRO_VERSION >= Z))
+/**
+ * The current major version of SDL_mixer headers.
+ *
+ * If this were SDL_mixer version 3.2.1, this value would be 3.
+ *
+ * \since This macro is available since SDL_mixer 3.0.0.
+ */
+#define MIX_MAJOR_VERSION   3
 
 /**
- * This function gets the version of the dynamically linked SDL_mixer library.
+ * The current minor version of the SDL headers.
  *
- * \returns SDL_mixer version.
+ * If this were SDL_mixer version 3.2.1, this value would be 2.
+ *
+ * \since This macro is available since SDL_mixer 3.0.0.
+ */
+#define MIX_MINOR_VERSION   0
+
+/**
+ * The current micro (or patchlevel) version of the SDL headers.
+ *
+ * If this were SDL_mixer version 3.2.1, this value would be 1.
+ *
+ * \since This macro is available since SDL_mixer 3.0.0.
+ */
+#define MIX_MICRO_VERSION   0
+
+/**
+ * This is the version number macro for the current SDL_mixer version.
+ *
+ * \since This macro is available since SDL_mixer 3.0.0.
+ *
+ * \sa MIX_GetVersion
+ */
+#define MIX_VERSION SDL_VERSIONNUM(MIX_MAJOR_VERSION, MIX_MINOR_VERSION, MIX_MICRO_VERSION)
+
+/**
+ * Get the version of SDL_mixer that is linked against your program.
+ *
+ * If you are linking to SDL_mixer dynamically, then it is possible that the current
+ * version will be different than the version you compiled against. This
+ * function returns the current version, while MIX_VERSION is the version
+ * you compiled with.
+ *
+ * This function may be called safely at any time, even before SDL_Init().
+ *
+ * \returns the version of the linked library.
  *
  * \since This function is available since SDL_mixer 3.0.0.
+ *
+ * \sa MIX_VERSION
  */
-extern SDL_DECLSPEC int SDLCALL MIX_Version(void);
+extern SDL_DECLSPEC int SDLCALL MIX_GetVersion(void);
+
 
 extern SDL_DECLSPEC bool MIX_Init(void);  // this will call SDL_Init(SDL_INIT_AUDIO), prepare optional decoders, etc.
 extern SDL_DECLSPEC void MIX_Quit(void);  // this will call SDL_QuitSubSystem(SDL_INIT_AUDIO), clean up global state, destroy any MIX_Mixers and MIX_Audio objects that remain, etc.
