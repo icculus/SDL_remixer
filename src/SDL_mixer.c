@@ -593,7 +593,7 @@ static void QuitDecoders(void)
     num_available_decoders = 0;
 }
 
-int MIX_Version(void)
+int MIX_GetVersion(void)
 {
     return MIX_VERSION;
 }
