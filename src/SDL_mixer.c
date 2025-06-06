@@ -826,8 +826,7 @@ bool MIX_GetMixerFormat(MIX_Mixer *mixer, SDL_AudioSpec *spec)
     } else if (!spec) {
         return SDL_InvalidParamError("spec");
     }
-    SDL_copyp(spec, &mixer->spec);
-    return true;  // technically this is the output format, forced to float32.
+    return SDL_GetAudioStreamFormat(mixer->output_stream, NULL, spec);
 }
 
 static const MIX_Decoder *PrepareDecoder(SDL_IOStream *io, MIX_Audio *audio)
