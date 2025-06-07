@@ -51,25 +51,30 @@
     MIX_LOADER_FUNCTION(true,int,mpg123_getformat,(mpg123_handle *mh, long *rate, int *channels, int *encoding)) \
     MIX_LOADER_FUNCTION(true,int,mpg123_init,(void)) \
     MIX_LOADER_FUNCTION(true,mpg123_handle*,mpg123_new,(const char* decoder, int *error)) \
-    MIX_LOADER_FUNCTION(true,int,mpg123_open_handle,(mpg123_handle *mh, void *iohandle)) \
     MIX_LOADER_FUNCTION(true,const char*,mpg123_plain_strerror,(int errcode)) \
-    MIX_LOADER_FUNCTION(true,int,mpg123_param,(mpg123_handle *mh, enum mpg123_parms type, long value, double fvalue)) \
     MIX_LOADER_FUNCTION(true,void,mpg123_rates,(const long **list, size_t *number)) \
     MIX_LOADER_FUNCTION(true,int,mpg123_read,(mpg123_handle *mh, Mpg123OutMemoryType outmemory, size_t outmemsize, size_t *done)) \
-    MIX_LOADER_FUNCTION(true,int,mpg123_replace_reader_handle,(mpg123_handle *mh, Mpg123SSizeType (*r_read) (void *, void *, size_t), off_t (*r_lseek)(void *, off_t, int), void (*cleanup)(void*))) \
     MIX_LOADER_FUNCTION(true,int,mpg123_scan,(mpg123_handle *mh)) \
-    MIX_LOADER_FUNCTION(true,off_t,mpg123_seek,(mpg123_handle *mh, off_t sampleoff, int whence)) \
-    MIX_LOADER_FUNCTION(true,off_t,mpg123_tell,(mpg123_handle *mh)) \
-    MIX_LOADER_FUNCTION(true,off_t,mpg123_length,(mpg123_handle *mh)) \
     MIX_LOADER_FUNCTION(true,const char*,mpg123_strerror,(mpg123_handle *mh)) \
 
-#if (MPG123_API_VERSION < 48) && !defined(MPG123_DYNAMIC)
-    #define mpg123_param2 mpg123_param
-    #define MIX_LOADER_FUNCTIONS MIX_LOADER_FUNCTIONS_mpg123base
+#if (MPG123_API_VERSION >= 49)
+    #define MIX_LOADER_FUNCTIONS \
+        MIX_LOADER_FUNCTIONS_mpg123base \
+        MIX_LOADER_FUNCTION(true,int,mpg123_param2,(mpg123_handle *mh, int type, long value, double fvalue)) \
+        MIX_LOADER_FUNCTION(true,int,mpg123_open_handle64,(mpg123_handle *mh, void *iohandle)) \
+        MIX_LOADER_FUNCTION(true,int,mpg123_reader64,(mpg123_handle *mh, int (*r_read)(void*, void*, size_t, size_t*), int64_t (*r_lseek)(void*, int64_t, int), void (*cleanup)(void*))) \
+        MIX_LOADER_FUNCTION(true,int64_t,mpg123_seek64,(mpg123_handle *mh, int64_t sampleoff, int whence)) \
+        MIX_LOADER_FUNCTION(true,int64_t,mpg123_tell64,(mpg123_handle *mh)) \
+        MIX_LOADER_FUNCTION(true,int64_t,mpg123_length64,(mpg123_handle *mh))
 #else
     #define MIX_LOADER_FUNCTIONS \
         MIX_LOADER_FUNCTIONS_mpg123base \
-        MIX_LOADER_FUNCTION(false,int,mpg123_param2,(mpg123_handle *mh, int type, long value, double fvalue))
+        MIX_LOADER_FUNCTION(true,int,mpg123_param,(mpg123_handle *mh, enum mpg123_parms type, long value, double fvalue)) \
+        MIX_LOADER_FUNCTION(true,int,mpg123_open_handle,(mpg123_handle *mh, void *iohandle)) \
+        MIX_LOADER_FUNCTION(true,int,mpg123_replace_reader_handle,(mpg123_handle *mh, Mpg123SSizeType (*r_read)(void *, void *, size_t), off_t (*r_lseek)(void *, off_t, int), void (*cleanup)(void*))) \
+        MIX_LOADER_FUNCTION(true,off_t,mpg123_seek,(mpg123_handle *mh, off_t sampleoff, int whence)) \
+        MIX_LOADER_FUNCTION(true,off_t,mpg123_tell,(mpg123_handle *mh)) \
+        MIX_LOADER_FUNCTION(true,off_t,mpg123_length,(mpg123_handle *mh))
 #endif
 
 #define MIX_LOADER_MODULE mpg123
@@ -82,12 +87,6 @@ static bool SDLCALL MPG123_init(void)
         return false;
     }
 
-    #if (MPG123_API_VERSION >= 48) || defined(MPG123_DYNAMIC)
-    if (!mpg123.mpg123_param2) {
-        // hope that the libmpg123 build we just linked to has sizeof(int) == sizeof(enum)
-        mpg123.mpg123_param2 = (int (*)(mpg123_handle*,int,long,double)) mpg123.mpg123_param;
-    }
-    #endif
     mpg123.mpg123_init();
 
     return true;
@@ -101,6 +100,22 @@ static void SDLCALL MPG123_quit(void)
     UnloadModule_mpg123();
 }
 
+#if (MPG123_API_VERSION >= 49)
+static int MPG123_IoRead(void* p, void* dst, size_t n, size_t *b)
+{
+    SDL_IOStream *io = (SDL_IOStream *) p;
+    *b = SDL_ReadIO(io, dst, n);
+    if (!*b && (SDL_GetIOStatus(io) != SDL_IO_STATUS_EOF)) {
+        return -1;
+    }
+    return 0;
+}
+
+static int64_t MPG123_IoSeek(void *p, int64_t offset, int whence)
+{
+    return SDL_SeekIO((SDL_IOStream *)p, offset, whence);
+}
+#else
 static Mpg123SSizeType MPG123_IoRead(void *p, void *dst, size_t n)
 {
     SDL_IOStream *io = (SDL_IOStream *) p;
@@ -115,6 +130,7 @@ static off_t MPG123_IoSeek(void *p, off_t offset, int whence)
 {
     return (off_t)SDL_SeekIO((SDL_IOStream *)p, (Sint64)offset, whence);
 }
+#endif
 
 static void MPG123_IoClose(void *p)
 {
@@ -219,9 +235,13 @@ static bool SDLCALL MPG123_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
         return SDL_SetError("mpg123_new failed");
     }
 
+    #if (MPG123_API_VERSION >= 49)
     mpg123.mpg123_param2(handle, MPG123_ADD_FLAGS, MPG123_QUIET, 0.0);  // don't log errors to stderr.
-
+    result = mpg123.mpg123_reader64(handle, MPG123_IoRead, MPG123_IoSeek, MPG123_IoClose);
+    #else
+    mpg123.mpg123_param(handle, MPG123_ADD_FLAGS, MPG123_QUIET, 0.0);   // don't log errors to stderr.
     result = mpg123.mpg123_replace_reader_handle(handle, MPG123_IoRead, MPG123_IoSeek, MPG123_IoClose);
+    #endif
     if (result != MPG123_OK) {
         SDL_SetError("mpg123_replace_reader_handle: %s", mpg_err(handle, result));
         goto failed;
@@ -244,7 +264,11 @@ static bool SDLCALL MPG123_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
         mpg123.mpg123_format(handle, rates[i], channels, formats);
     }
 
+    #if (MPG123_API_VERSION >= 49)
+    result = mpg123.mpg123_open_handle64(handle, io);
+    #else
     result = mpg123.mpg123_open_handle(handle, io);
+    #endif
     if (result != MPG123_OK) {
         SDL_SetError("mpg123_open_handle: %s", mpg_err(handle, result));
         goto failed;
@@ -271,7 +295,11 @@ static bool SDLCALL MPG123_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
     }
 
     // mpg123_length() returns sample frames, or MPG123_ERR, which happens to be -1, which we use for "don't know" here.
+    #if (MPG123_API_VERSION >= 49)
+    *duration_frames = mpg123.mpg123_length64(handle);
+    #else
     *duration_frames = (Sint64) mpg123.mpg123_length(handle);
+    #endif
     
     mpg123.mpg123_close(handle);
     mpg123.mpg123_delete(handle);
@@ -299,9 +327,13 @@ bool SDLCALL MPG123_init_track(void *audio_userdata, SDL_IOStream *io, const SDL
         return SDL_SetError("mpg123_new failed");
     }
 
+    #if (MPG123_API_VERSION >= 49)
     mpg123.mpg123_param2(handle, MPG123_ADD_FLAGS, MPG123_QUIET, 0.0);  // don't log errors to stderr.
-
+    result = mpg123.mpg123_reader64(handle, MPG123_IoRead, MPG123_IoSeek, MPG123_IoClose);
+    #else
+    mpg123.mpg123_param(handle, MPG123_ADD_FLAGS, MPG123_QUIET, 0.0);   // don't log errors to stderr.
     result = mpg123.mpg123_replace_reader_handle(handle, MPG123_IoRead, MPG123_IoSeek, MPG123_IoClose);
+    #endif
     if (result != MPG123_OK) {
         SDL_SetError("mpg123_replace_reader_handle: %s", mpg_err(handle, result));
         mpg123.mpg123_delete(handle);
@@ -329,7 +361,11 @@ bool SDLCALL MPG123_init_track(void *audio_userdata, SDL_IOStream *io, const SDL
         mpg123.mpg123_format(handle, rates[i], channels, formats);
     }
 
+    #if (MPG123_API_VERSION >= 49)
+    result = mpg123.mpg123_open_handle64(handle, io);
+    #else
     result = mpg123.mpg123_open_handle(handle, io);
+    #endif
     if (result != MPG123_OK) {
         SDL_SetError("mpg123_open_handle: %s", mpg_err(handle, result));
         mpg123.mpg123_delete(handle);
@@ -387,7 +423,11 @@ bool SDLCALL MPG123_decode(void *track_userdata, SDL_AudioStream *stream)
 bool SDLCALL MPG123_seek(void *track_userdata, Uint64 frame)
 {
     mpg123_handle *handle = (mpg123_handle *) track_userdata;
+    #if (MPG123_API_VERSION >= 49)
+    const int64_t rc = mpg123.mpg123_seek64(handle, (int64_t) frame, SEEK_SET);
+    #else
     const off_t rc = mpg123.mpg123_seek(handle, (off_t) frame, SEEK_SET);
+    #endif
     return (rc < 0) ? SDL_SetError("mpg123_seek:%s", mpg_err(handle, rc)) : true;
 }
 
