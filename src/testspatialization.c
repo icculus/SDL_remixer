@@ -81,7 +81,6 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     static const SDL_FPoint center = { 640.0f / 2.0f, 480.0f / 2.0f };
     const float radius = 200.0f;  // size of half the circle (radius, not diameter).
     const float boxsize = 30.0f;
-    const float scale = 3.0f;
     SDL_FPoint sourcept;
     MIX_Point3D position;
 
@@ -99,10 +98,16 @@ SDL_AppResult SDL_AppIterate(void *appstate)
         sourcept.y = mouse_y - (boxsize / 2.0f);
     }
 
+    #if 0
+    const float scale = 3.0f;
     position.x *= scale;  // make distance attenuation noticable.
     position.z *= scale;
-
     MIX_SetTrack3DPosition(track, &position);
+    #else
+    const float right = (position.x + 1.0f) / 2.0f;  // move to 0.0f - 1.0f.
+    const MIX_StereoGains gains = { 1.0f - right, right };
+    MIX_SetTrackStereo(track, &gains);
+    #endif
 
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);

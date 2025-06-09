@@ -77,5 +77,6 @@ SDL3_mixer_0.0.0 {
     MIX_GetMixerProperties;
     MIX_GetTrackProperties;
     MIX_GetGroupProperties;
+    MIX_SetTrackStereo;
   local: *;
 };

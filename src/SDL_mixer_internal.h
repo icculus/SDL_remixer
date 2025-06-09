@@ -57,6 +57,13 @@ extern bool MIX_HasNEON;
 
 #include "SDL3_mixer/SDL_mixer.h"
 
+typedef enum MIX_SpatializationMode
+{
+    MIX_SPATIALIZATION_NONE,
+    MIX_SPATIALIZATION_STEREO,
+    MIX_SPATIALIZATION_3D
+} MIX_SpatializationMode;
+
 // Vector Based Amplitude Panning stuff, for surround sound positional audio.
 // VBAP code originally from https://github.com/drbafflegab/vbap/ ... CC0 license (public domain).
 #define MIX_VBAP2D_MAX_RESOLUTION 3600
@@ -130,7 +137,7 @@ struct MIX_Audio
 struct MIX_Track
 {
     float SDL_ALIGNED(16) position3d[4];   // we only need the X, Y, and Z coords, but the 4th element makes this SIMD-friendly.
-    bool spatialized;
+    MIX_SpatializationMode spatialization_mode;
     float spatialization_panning[2];
     int spatialization_speakers[2];
     MIX_Mixer *mixer;

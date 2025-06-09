@@ -257,6 +257,62 @@ extern SDL_DECLSPEC bool SDLCALL MIX_SetTrackOutputChannelMap(MIX_Track *track, 
 
 
 // positional audio...
+
+
+/**
+ * A set of per-channel gains for tracks using MIX_SetTrackStereo().
+ *
+ * When forcing a track to stereo, the app can specify a per-channel gain, to
+ * further adjust the left or right outputs.
+ *
+ * When mixing audio that has been forced to stereo, each channel is modulated
+ * by these values. A value of 1.0f produces no change, 0.0f produces silence.
+ *
+ * A simple panning effect would be to set `left` to the desired value and
+ * `right` to `1.0f - left`.
+ *
+ * \since This struct is available since SDL_mixer 3.0.0.
+ *
+ * \sa MIX_SetTrackStereo
+ */
+typedef struct MIX_StereoGains
+{
+    float left;
+    float right;
+} MIX_StereoGains;
+
+/**
+ * Force a track to stereo output, with optionally left/right panning.
+ *
+ * This will cause the output of the track to convert to stereo, and then mix
+ * it only onto the Front Left and Front Right speakers, regardless of the
+ * speaker configuration. The left and right channels are modulated by
+ * `gains`, which can be used to produce panning effects. This function may
+ * be called to adjust the gains at any time.
+ *
+ * If `gains` is not NULL, this track will be switched into forced-stereo
+ * mode. If `gains` is NULL, this will disable spatialization (both the
+ * forced-stereo mode of this function and full 3D spatialization of
+ * MIX_SetTrack3DPosition()).
+ *
+ * Negative gains are clamped to zero; there is no clamp for maximum, so one
+ * could set the value > 1.0f to make a channel louder.
+ *
+ * The track's 3D position, reported by MIX_GetTrack3DPosition(), will be
+ * reset to (0, 0, 0).
+ *
+ * \param track the track to adjust.
+ * \param gains the per-channel gains, or NULL to disable spatialization.
+ * \returns true on success or false on failure; call SDL_GetError() for more
+ *          information.
+ *
+ * \threadsafety It is safe to call this function from any thread.
+ *
+ * \since This function is available since SDL_mixer 3.0.0.
+ */
+extern SDL_DECLSPEC bool SDLCALL MIX_SetTrackStereo(MIX_Track *track, const MIX_StereoGains *gains);
+
+
 typedef struct MIX_Point3D
 {
     float x;

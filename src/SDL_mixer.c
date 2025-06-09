@@ -169,10 +169,13 @@ CHECKTAGPLUSPARAM(MIX_Track, Track, track)
 static bool SetTrackOutputStreamFormat(MIX_Track *track, const SDL_AudioSpec *spec)
 {
     SDL_copyp(&track->output_spec, &track->mixer->spec);
-    if (track->spatialized) {
+    if (track->spatialization_mode == MIX_SPATIALIZATION_3D) {
         track->output_spec.channels = 1;
+    } else if (track->spatialization_mode == MIX_SPATIALIZATION_STEREO) {
+        track->output_spec.channels = 2;
     }
-    const bool retval = SDL_SetAudioStreamFormat(track->output_stream, spec, &track->output_spec);   // input is `spec`, output is to mixer->output_stream (or, if spatializing, to mixer->output_stream but mono).
+
+    const bool retval = SDL_SetAudioStreamFormat(track->output_stream, spec, &track->output_spec);   // input is `spec`, output is to mixer->output_stream (or, if spatializing, to mixer->output_stream but mono...if force_stereo, output_stream but stereo).
     SDL_assert(retval != false);
     return retval;
 }
@@ -201,7 +204,7 @@ static bool SDLCALL AudioDeviceChangeEventWatcher(void *userdata, SDL_Event *eve
             for (MIX_Track *track = mixer->all_tracks; track; track = track->next) {
                 LockTrack(track);
                 SetTrackOutputStreamFormat(track, NULL);   // input is from internal_stream, output is to mixer->output_stream (or, if spatializing, to mixer->output_stream but mono).
-                if (track->spatialized) {  // deal with channel count changing.
+                if (track->spatialization_mode == MIX_SPATIALIZATION_3D) {  // deal with channel count changing.
                     MIX_Spatialize(&track->mixer->vbap2d, track->position3d, track->spatialization_panning, track->spatialization_speakers);
                 }
                 UnlockTrack(track);
@@ -475,6 +478,19 @@ static void MixSpatializedFloat32Audio(float *dst, const float *src, const int s
     }
 }
 
+static void MixForcedStereoFloat32Audio(float *dst, const float *src, const int sample_frames, const int output_channels, const float *panning, const float gain)
+{
+    const float panning0 = panning[0] * gain;
+    const float panning1 = panning[1] * gain;
+
+    // !!! FIXME: a common case (output_channels==2) can be easily SIMD'd.
+    // !!! FIXME: unroll this loop?
+    for (int i = 0; i < sample_frames; i++, dst += output_channels, src += 2) {
+        dst[0] += src[0] * panning0;
+        dst[1] += src[1] * panning1;
+    }
+}
+
 static void MixFloat32Audio(float *dst, const float *src, const int buffer_size, const float gain)
 {
     if (!SDL_MixAudio((Uint8 *) dst, (const Uint8 *) src, SDL_AUDIO_F32, buffer_size, gain)) {
@@ -534,14 +550,28 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
                     track->cooked_callback(track->cooked_callback_userdata, track, &track->output_spec, getbuf, br / sizeof (float));
                 }
 
-                if (track->spatialized) {
-                    SDL_assert(track->output_spec.channels == 1);
-                    MixSpatializedFloat32Audio(group_mixbuf, getbuf, br / sizeof (float), mixer->spec.channels, track->spatialization_panning, track->spatialization_speakers, mixer->gain);
-                    group_bytes = SDL_max(group_bytes, br * mixer->spec.channels);
-                } else {
-                    SDL_assert(track->output_spec.channels == mixer->spec.channels);
-                    MixFloat32Audio(group_mixbuf, getbuf, br, mixer->gain);
-                    group_bytes = SDL_max(group_bytes, br);
+                switch (track->spatialization_mode) {
+                    case MIX_SPATIALIZATION_NONE:
+                        SDL_assert(track->output_spec.channels == mixer->spec.channels);
+                        MixFloat32Audio(group_mixbuf, getbuf, br, mixer->gain);
+                        group_bytes = SDL_max(group_bytes, br);
+                        break;
+
+                    case MIX_SPATIALIZATION_3D:
+                        SDL_assert(track->output_spec.channels == 1);
+                        MixSpatializedFloat32Audio(group_mixbuf, getbuf, br / sizeof (float), mixer->spec.channels, track->spatialization_panning, track->spatialization_speakers, mixer->gain);
+                        group_bytes = SDL_max(group_bytes, br * mixer->spec.channels);
+                        break;
+
+                    case MIX_SPATIALIZATION_STEREO:
+                        SDL_assert(track->output_spec.channels == 2);
+                        MixForcedStereoFloat32Audio(group_mixbuf, getbuf, br / (sizeof (float) * 2), mixer->spec.channels, track->spatialization_panning, mixer->gain);
+                        group_bytes = SDL_max(group_bytes, (br / 2) * mixer->spec.channels);
+                        break;
+
+                    default:
+                        SDL_assert(!"Unexpected spatialization mode");
+                        break;
                 }
             }
         }
@@ -2320,6 +2350,46 @@ bool MIX_SetTrackOutputChannelMap(MIX_Track *track, const int *chmap, int count)
     return retval;
 }
 
+
+bool MIX_SetTrackStereo(MIX_Track *track, const MIX_StereoGains *gains)
+{
+    if (!CheckTrackParam(track)) {
+        return false;
+    }
+
+    LockTrack(track);
+
+    const bool wants_stereo = (gains != NULL);
+    const MIX_SpatializationMode new_mode = wants_stereo ? MIX_SPATIALIZATION_STEREO : MIX_SPATIALIZATION_NONE;
+    if (track->spatialization_mode != new_mode) {
+        track->spatialization_mode = new_mode;
+        SetTrackOutputStreamFormat(track, NULL);   // change output format to stereo (or back to normal) if necessary.
+    }
+
+    track->position3d[0] = track->position3d[1] = track->position3d[2] = 0.0f;
+
+    if (wants_stereo) {
+        const float left = SDL_max(0.0f, gains->left);
+        const float right = SDL_max(0.0f, gains->right);
+        if (track->mixer->spec.channels == 1) {  // mono output
+            track->spatialization_speakers[0] = track->spatialization_speakers[1] = 0;
+            track->spatialization_panning[0] = left * 0.5f;
+            track->spatialization_panning[1] = right * 0.5f;
+        } else {
+            track->spatialization_speakers[0] = 0;
+            track->spatialization_speakers[1] = 1;
+            track->spatialization_panning[0] = left;
+            track->spatialization_panning[1] = right;
+        }
+    }
+
+    UnlockTrack(track);
+
+    return true;
+
+}
+
+
 bool MIX_SetTrack3DPosition(MIX_Track *track, const MIX_Point3D *position)
 {
     if (!CheckTrackParam(track)) {
@@ -2329,13 +2399,14 @@ bool MIX_SetTrack3DPosition(MIX_Track *track, const MIX_Point3D *position)
     LockTrack(track);
 
     const bool wants_spatialization = (position != NULL);
-    const bool toggling = (track->spatialized != wants_spatialization);
+    const MIX_SpatializationMode new_mode = wants_spatialization ? MIX_SPATIALIZATION_3D : MIX_SPATIALIZATION_NONE;
+    const bool toggling = (track->spatialization_mode != new_mode);
     if (toggling) {
-        track->spatialized = wants_spatialization;
-        SetTrackOutputStreamFormat(track, NULL);   // change output format to mono (or back to normal) if necessary.
+        track->spatialization_mode = new_mode;
+        SetTrackOutputStreamFormat(track, NULL);   // change output format to stereo (or back to normal) if necessary.
     }
 
-    if (!position) {
+    if (!wants_spatialization) {
         track->position3d[0] = track->position3d[1] = track->position3d[2] = 0.0f;
     } else {
         float *tposition3d = track->position3d;
