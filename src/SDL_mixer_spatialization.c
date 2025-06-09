@@ -411,7 +411,8 @@ void MIX_Spatialize(const MIX_VBAP2D *vbap2d, const float *position, float *pann
 
     if (output_channels == 1) {  // no positioning for mono output, just distance attenuation.
         speakers[0] = speakers[1] = 0;
-        panning[0] = panning[1] = gain;
+        panning[0] = gain;
+        panning[1] = 0.0f;
     } else if ((output_channels == 2) || (output_channels == 3)) {  // stereo (and 2.1) output uses Constant Power Panning.
         speakers[0] = 0;
         speakers[1] = 1;
