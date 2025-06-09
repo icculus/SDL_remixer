@@ -471,10 +471,20 @@ static void MixSpatializedFloat32Audio(float *dst, const float *src, const int s
 
     // !!! FIXME: a common case (output_channels==2, speaker0=0, speaker1=1) can be easily SIMD'd.
     // !!! FIXME: unroll this loop?
-    for (int i = 0; i < samples; i++, dst += output_channels, src++) {
-        const float sample = *src;
-        dst[speaker0] += sample * panning0;
-        dst[speaker1] += sample * panning1;
+    if ((panning0 == 0.0f) && (panning1 == 0.0f)) {
+        return;  // don't mix silence.
+    } else if ((panning0 == 1.0f) && (panning1 == 1.0f)) {  // no modulation.
+        for (int i = 0; i < samples; i++, dst += output_channels, src++) {
+            const float sample = *src;
+            dst[speaker0] += sample;
+            dst[speaker1] += sample;
+        }
+    } else {
+        for (int i = 0; i < samples; i++, dst += output_channels, src++) {
+            const float sample = *src;
+            dst[speaker0] += sample * panning0;
+            dst[speaker1] += sample * panning1;
+        }
     }
 }
 
@@ -485,15 +495,26 @@ static void MixForcedStereoFloat32Audio(float *dst, const float *src, const int 
 
     // !!! FIXME: a common case (output_channels==2) can be easily SIMD'd.
     // !!! FIXME: unroll this loop?
-    for (int i = 0; i < sample_frames; i++, dst += output_channels, src += 2) {
-        dst[0] += src[0] * panning0;
-        dst[1] += src[1] * panning1;
+    if ((panning0 == 0.0f) && (panning1 == 0.0f)) {
+        return;  // don't mix silence.
+    } else if ((panning0 == 1.0f) && (panning1 == 1.0f)) {  // no modulation.
+        for (int i = 0; i < sample_frames; i++, dst += output_channels, src += 2) {
+            dst[0] += src[0];
+            dst[1] += src[1];
+        }
+    } else {
+        for (int i = 0; i < sample_frames; i++, dst += output_channels, src += 2) {
+            dst[0] += src[0] * panning0;
+            dst[1] += src[1] * panning1;
+        }
     }
 }
 
 static void MixFloat32Audio(float *dst, const float *src, const int buffer_size, const float gain)
 {
-    if (!SDL_MixAudio((Uint8 *) dst, (const Uint8 *) src, SDL_AUDIO_F32, buffer_size, gain)) {
+    if (gain == 0.0f) {
+        return;  // don't mix silence.
+    } else if (!SDL_MixAudio((Uint8 *) dst, (const Uint8 *) src, SDL_AUDIO_F32, buffer_size, gain)) {
         SDL_assert(!"This shouldn't happen.");
     }
 }
