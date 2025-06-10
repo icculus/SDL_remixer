@@ -379,6 +379,10 @@ typedef struct MIX_AudioDecoder MIX_AudioDecoder;
  * When done with the audio decoder, it can be destroyed with
  * MIX_DestroyAudioDecoder().
  *
+ * This function requires SDL_mixer to have been initialized with a successful
+ * call to MIX_Init(), but does not need an actual MIX_Mixer to have been
+ * created.
+ *
  * \params path the filesystem path of the audio file to decode.
  * \params props file-specific properties needed for decoding. May be zero.
  * \returns an audio decoder, ready to decode.
@@ -411,6 +415,10 @@ extern SDL_DECLSPEC MIX_AudioDecoder * SDLCALL MIX_CreateAudioDecoder(const char
  *
  * When done with the audio decoder, it can be destroyed with
  * MIX_DestroyAudioDecoder().
+ *
+ * This function requires SDL_mixer to have been initialized with a successful
+ * call to MIX_Init(), but does not need an actual MIX_Mixer to have been
+ * created.
  *
  * \params io the i/o stream from which to decode data.
  * \params closeio if true, close the stream when done.
