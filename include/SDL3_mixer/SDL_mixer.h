@@ -349,6 +349,145 @@ extern SDL_DECLSPEC bool SDLCALL MIX_SetPostMixCallback(MIX_Mixer *mixer, MIX_Po
 // can only call this if mixer came from MIX_CreateMixer() instead of MIX_CreateMixerDevice(). `buflen` must be a multiple of the output frame size! Will run as fast as you let it!
 extern SDL_DECLSPEC bool MIX_Generate(MIX_Mixer *mixer, float *buffer, int buflen);
 
+/**
+ * An opaque object that represents an audio decoder.
+ *
+ * Most apps won't need this, as SDL_mixer's usual interfaces will decode
+ * audio as needed. However, if one wants to decode an audio file into a
+ * memory buffer without playing it, this interface offers that.
+ *
+ * These objects are created with MIX_CreateAudioDecoder() or
+ * MIX_CreateAudioDecoder_IO(), and then can use MIX_DecodeAudio() to retrieve
+ * the raw PCM data.
+ *
+ * \since This struct is available since SDL_mixer 3.0.0.
+ */
+typedef struct MIX_AudioDecoder MIX_AudioDecoder;
+
+/**
+ * Create a MIX_AudioDecoder from a path on the filesystem.
+ *
+ * Most apps won't need this, as SDL_mixer's usual interfaces will decode
+ * audio as needed. However, if one wants to decode an audio file into a
+ * memory buffer without playing it, this interface offers that.
+ *
+ * This function allows properties to be specified. This is intended to supply
+ * file-specific settings, such as where to find SoundFonts for a MIDI file,
+ * etc. In most cases, the caller should pass a zero to specify no extra
+ * properties.
+ *
+ * When done with the audio decoder, it can be destroyed with
+ * MIX_DestroyAudioDecoder().
+ *
+ * \params path the filesystem path of the audio file to decode.
+ * \params props file-specific properties needed for decoding. May be zero.
+ * \returns an audio decoder, ready to decode.
+ *
+ * \threadsafety It is safe to call this function from any thread.
+ *
+ * \since This function is available since SDL_mixer 3.0.0.
+ *
+ * \sa MIX_CreateAudioDecoder_IO
+ * \sa MIX_DecodeAudio
+ * \sa MIX_DestroyAudioDecoder
+ */
+extern SDL_DECLSPEC MIX_AudioDecoder * SDLCALL MIX_CreateAudioDecoder(const char *path, SDL_PropertiesID props);
+
+/**
+ * Create a MIX_AudioDecoder from an SDL_IOStream.
+ *
+ * Most apps won't need this, as SDL_mixer's usual interfaces will decode
+ * audio as needed. However, if one wants to decode an audio file into a
+ * memory buffer without playing it, this interface offers that.
+ *
+ * This function allows properties to be specified. This is intended to supply
+ * file-specific settings, such as where to find SoundFonts for a MIDI file,
+ * etc. In most cases, the caller should pass a zero to specify no extra
+ * properties.
+ *
+ * If `closeio` is true, then `io` will be closed when this decoder is done
+ * with it. If this function fails and `closeio` is true, then `io` will be
+ * closed before this function returns.
+ *
+ * When done with the audio decoder, it can be destroyed with
+ * MIX_DestroyAudioDecoder().
+ *
+ * \params io the i/o stream from which to decode data.
+ * \params closeio if true, close the stream when done.
+ * \params props file-specific properties needed for decoding. May be zero.
+ * \returns an audio decoder, ready to decode.
+ *
+ * \threadsafety It is safe to call this function from any thread.
+ *
+ * \since This function is available since SDL_mixer 3.0.0.
+ *
+ * \sa MIX_CreateAudioDecoder_IO
+ * \sa MIX_DecodeAudio
+ * \sa MIX_DestroyAudioDecoder
+ */
+extern SDL_DECLSPEC MIX_AudioDecoder * SDLCALL MIX_CreateAudioDecoder_IO(SDL_IOStream *io, bool closeio, SDL_PropertiesID props);
+
+/**
+ * Destroy the specified audio decoder.
+ *
+ * Destroying a NULL MIX_AudioDecoder is a legal no-op.
+ *
+ * \param audiodecoder the audio to destroy.
+ *
+ * \threadsafety It is safe to call this function from any thread.
+ *
+ * \since This function is available since SDL_mixer 3.0.0.
+ */
+extern SDL_DECLSPEC void SDLCALL MIX_DestroyAudioDecoder(MIX_AudioDecoder *audiodecoder);
+
+/**
+ * Get the properties associated with a MIX_AudioDecoder.
+ *
+ * SDL_mixer offers some properties of its own, but this can also be a
+ * convenient place to store app-specific data.
+ *
+ * A SDL_PropertiesID is created the first time this function is called for a
+ * given MIX_AudioDecoder, if necessary.
+ *
+ * The file-specific metadata exposed through this function is identical to
+ * those available through MIX_GetAudioProperties(). Please refer to that
+ * function's documentation for details.
+ *
+ * \param audiodecoder the audio decoder to query.
+ * \returns a valid property ID on success or 0 on failure; call
+ *          SDL_GetError() for more information.
+ *
+ * \threadsafety It is safe to call this function from any thread.
+ *
+ * \since This function is available since SDL_mixer 3.0.0.
+ *
+ * \sa MIX_GetAudioProperties
+ */
+extern SDL_DECLSPEC SDL_PropertiesID SDLCALL MIX_GetAudioDecoderProperties(MIX_AudioDecoder *audiodecoder);
+
+/**
+ * Decode more audio from a MIX_AudioDecoder.
+ *
+ * Data is decoded on demand in whatever format is requested. The format is
+ * permitted to change between calls.
+ *
+ * This function will return the number of bytes decoded, which may be less
+ * than requested if there was an error or end-of-file. A return value of zero
+ * means the entire file was decoded, -1 means an unrecoverable error happened.
+ *
+ * \param audiodecoder the decoder from which to retrieve more data.
+ * \param buffer the memory buffer to store decoded audio.
+ * \param buflen the maximum number of bytes to store to `buffer`.
+ * \param spec the format that audio data will be stored to `buffer`.
+ * \returns number of bytes decoded, or -1 on error; call SDL_GetError() for
+ *          more information.
+ *
+ * \threadsafety It is safe to call this function from any thread.
+ *
+ * \since This function is available since SDL_mixer 3.0.0.
+ */
+extern SDL_DECLSPEC int SDLCALL MIX_DecodeAudio(MIX_AudioDecoder *audiodecoder, void *buffer, int buflen, const SDL_AudioSpec *spec);
+
 /* Ends C function definitions when using C++ */
 #ifdef __cplusplus
 }

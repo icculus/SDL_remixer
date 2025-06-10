@@ -235,6 +235,18 @@ typedef struct MIX_TagList
     SDL_RWLock *rwlock;
 } MIX_TagList;
 
+struct MIX_AudioDecoder
+{
+    MIX_Audio *audio;
+    void *track_userdata;
+    SDL_IOStream *io;
+    bool closeio;
+    SDL_AudioStream *stream;
+    MIX_AudioDecoder *prev;  // double-linked list for all_audiodecoders.
+    MIX_AudioDecoder *next;
+};
+
+
 // Parse through an SDL_IOStream for tags (ID3, APE, MusicMatch, etc), and add metadata to props.
 // !!! FIXME: see FIXME in the function's implementation; just ignore return values from this function for now.
 extern bool MIX_ReadMetadataTags(SDL_IOStream *io, SDL_PropertiesID props, MIX_IoClamp *clamp);

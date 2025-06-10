@@ -82,6 +82,7 @@ static int num_available_decoders = 0;
 static int mixer_initialized = 0;
 static MIX_Mixer *all_mixers = NULL;
 static MIX_Audio *all_audios = NULL;
+static MIX_AudioDecoder *all_audiodecoders = NULL;
 static SDL_Mutex *global_lock = NULL;
 
 #if defined(SDL_NEON_INTRINSICS) && SDL_MIXER_NEED_SCALAR_FALLBACK
@@ -145,6 +146,7 @@ CHECKPARAMFUNC(MIX_Mixer, Mixer, mixer)
 CHECKPARAMFUNC(MIX_Track, Track, track)
 CHECKPARAMFUNC(MIX_Audio, Audio, audio)
 CHECKPARAMFUNC(MIX_Group, Group, group)
+CHECKPARAMFUNC(MIX_AudioDecoder, AudioDecoder, audiodecoder)
 
 #undef CHECKPARAMFUNC
 
@@ -696,6 +698,10 @@ void MIX_Quit(void)
     }
 
     // actually shutting down now.
+    while (all_audiodecoders) {
+        MIX_DestroyAudioDecoder(all_audiodecoders);
+    }
+
     while (all_mixers) {
         MIX_DestroyMixer(all_mixers);
     }
@@ -2626,6 +2632,146 @@ bool MIX_SetGroupPostMixCallback(MIX_Group *group, MIX_GroupMixCallback cb, void
 
     return true;
 }
+
+MIX_AudioDecoder * MIX_CreateAudioDecoder_IO(SDL_IOStream *io, bool closeio, SDL_PropertiesID props)
+{
+    if (!CheckInitialized()) {
+        return NULL;
+    } else if (!io) {
+        SDL_InvalidParamError("io");
+        return NULL;
+    }
+
+    MIX_AudioDecoder *audiodecoder = (MIX_AudioDecoder *) SDL_calloc(1, sizeof (*audiodecoder));
+    if (!audiodecoder) {
+        if (closeio) {
+            SDL_CloseIO(io);
+        }
+        return NULL;
+    }
+
+    audiodecoder->io = io;
+    audiodecoder->closeio = closeio;
+
+    const SDL_PropertiesID tmpprops = SDL_CreateProperties();
+    if (!tmpprops) {
+        if (closeio) {
+            SDL_CloseIO(io);
+        }
+        SDL_free(audiodecoder);
+        return NULL;
+    }
+
+    if (props) {
+        if (!SDL_CopyProperties(props, tmpprops)) {
+            SDL_DestroyProperties(tmpprops);
+            if (closeio) {
+                SDL_CloseIO(io);
+            }
+            SDL_free(audiodecoder);
+            return NULL;
+        }
+    }
+
+    SDL_SetPointerProperty(tmpprops, MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER, io);
+    SDL_SetBooleanProperty(tmpprops, MIX_PROP_AUDIO_LOAD_ONDEMAND_BOOLEAN, true);
+    audiodecoder->audio = MIX_LoadAudioWithProperties(tmpprops);
+    SDL_DestroyProperties(tmpprops);
+
+    if (!audiodecoder->audio) {
+        SDL_free(audiodecoder);
+        return NULL;
+    }
+
+    if (!audiodecoder->audio->decoder->init_track(audiodecoder->audio->decoder_userdata, io, &audiodecoder->audio->spec, audiodecoder->audio->props, &audiodecoder->track_userdata)) {
+        MIX_DestroyAudio(audiodecoder->audio);
+        SDL_free(audiodecoder);
+        return NULL;
+    }
+
+    audiodecoder->stream = SDL_CreateAudioStream(&audiodecoder->audio->spec, &audiodecoder->audio->spec);
+    if (!audiodecoder->stream) {
+        audiodecoder->audio->decoder->quit_track(audiodecoder->track_userdata);
+        MIX_DestroyAudio(audiodecoder->audio);
+        SDL_free(audiodecoder);
+        return NULL;
+    }
+
+    LockGlobal();
+    audiodecoder->next = all_audiodecoders;
+    if (all_audiodecoders) {
+        all_audiodecoders->prev = audiodecoder;
+    }
+    all_audiodecoders = audiodecoder;
+    UnlockGlobal();
+
+    return audiodecoder;
+}
+
+MIX_AudioDecoder *MIX_CreateAudioDecoder(const char *path, SDL_PropertiesID props)
+{
+    if (!CheckInitialized()) {
+        return NULL;
+    } else if (!path) {
+        SDL_InvalidParamError("path");
+        return NULL;
+    }
+
+    SDL_IOStream *io = SDL_IOFromFile(path, "rb");
+    if (!io) {
+        return NULL;
+    }
+
+    return MIX_CreateAudioDecoder_IO(io, true, props);
+}
+
+void MIX_DestroyAudioDecoder(MIX_AudioDecoder *audiodecoder)
+{
+    if (CheckAudioDecoderParam(audiodecoder)) {
+        LockGlobal();
+        if (audiodecoder->prev) {
+            audiodecoder->prev->next = audiodecoder->next;
+        } else {
+            all_audiodecoders = audiodecoder->next;
+        }
+        if (audiodecoder->next) {
+            audiodecoder->next->prev = audiodecoder->prev;
+        }
+        UnlockGlobal();
+
+        audiodecoder->audio->decoder->quit_track(audiodecoder->track_userdata);
+        MIX_DestroyAudio(audiodecoder->audio);
+        SDL_DestroyAudioStream(audiodecoder->stream);
+        if (audiodecoder->closeio) {
+            SDL_CloseIO(audiodecoder->io);
+        }
+        SDL_free(audiodecoder);
+    }
+}
+
+SDL_PropertiesID MIX_GetAudioDecoderProperties(MIX_AudioDecoder *audiodecoder)
+{
+    return CheckAudioDecoderParam(audiodecoder) ? MIX_GetAudioProperties(audiodecoder->audio) : 0;
+}
+
+int MIX_DecodeAudio(MIX_AudioDecoder *audiodecoder, void *buffer, int buflen, const SDL_AudioSpec *spec)
+{
+    if (!CheckAudioDecoderParam(audiodecoder)) {
+        return -1;
+    }
+
+    SDL_SetAudioStreamFormat(audiodecoder->stream, NULL, spec);
+
+    while (SDL_GetAudioStreamAvailable(audiodecoder->stream) < buflen) {
+        if (!audiodecoder->audio->decoder->decode(audiodecoder->track_userdata, audiodecoder->stream)) {
+            SDL_FlushAudioStream(audiodecoder->stream);  // make sure we read _everything_ now.
+            break;
+        }
+    }
+
+    return SDL_GetAudioStreamData(audiodecoder->stream, buffer, buflen);
+}
+
 
 // Clamp an IOStream to a subset of its available data.
 static Sint64 MIX_IoClamp_size(void *userdata)

@@ -78,5 +78,10 @@ SDL3_mixer_0.0.0 {
     MIX_GetTrackProperties;
     MIX_GetGroupProperties;
     MIX_SetTrackStereo;
+    MIX_CreateAudioDecoder;
+    MIX_CreateAudioDecoder_IO;
+    MIX_DestroyAudioDecoder;
+    MIX_GetAudioDecoderProperties;
+    MIX_DecodeAudio;
   local: *;
 };
