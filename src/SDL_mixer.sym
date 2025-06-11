@@ -83,5 +83,6 @@ SDL3_mixer_0.0.0 {
     MIX_DestroyAudioDecoder;
     MIX_GetAudioDecoderProperties;
     MIX_DecodeAudio;
+    MIX_GetAudioDecoderFormat;
   local: *;
 };

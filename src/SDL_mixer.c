@@ -2754,6 +2754,11 @@ SDL_PropertiesID MIX_GetAudioDecoderProperties(MIX_AudioDecoder *audiodecoder)
     return CheckAudioDecoderParam(audiodecoder) ? MIX_GetAudioProperties(audiodecoder->audio) : 0;
 }
 
+bool MIX_GetAudioDecoderFormat(MIX_AudioDecoder *audiodecoder, SDL_AudioSpec *spec)
+{
+    return CheckAudioDecoderParam(audiodecoder) ? MIX_GetAudioFormat(audiodecoder->audio, spec) : false;
+}
+
 int MIX_DecodeAudio(MIX_AudioDecoder *audiodecoder, void *buffer, int buflen, const SDL_AudioSpec *spec)
 {
     if (!CheckAudioDecoderParam(audiodecoder)) {

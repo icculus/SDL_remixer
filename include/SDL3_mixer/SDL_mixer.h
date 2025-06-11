@@ -474,6 +474,25 @@ extern SDL_DECLSPEC void SDLCALL MIX_DestroyAudioDecoder(MIX_AudioDecoder *audio
 extern SDL_DECLSPEC SDL_PropertiesID SDLCALL MIX_GetAudioDecoderProperties(MIX_AudioDecoder *audiodecoder);
 
 /**
+ * Query the initial audio format of a MIX_AudioDecoder.
+ *
+ * Note that some audio files can change format in the middle; some explicitly
+ * support this, but a more common example is two MP3 files concatenated
+ * together. In many cases, SDL_mixer will correctly handle these sort of
+ * files, but this function will only report the initial format a file uses.
+ *
+ * \param audiodecoder the audio decoder to query.
+ * \param spec on success, audio format details will be stored here.
+ * \returns true on success or false on failure; call SDL_GetError() for more
+ *          information.
+ *
+ * \threadsafety It is safe to call this function from any thread.
+ *
+ * \since This function is available since SDL_mixer 3.0.0.
+ */
+extern SDL_DECLSPEC bool SDLCALL MIX_GetAudioDecoderFormat(MIX_AudioDecoder *audiodecoder, SDL_AudioSpec *spec);
+
+/**
  * Decode more audio from a MIX_AudioDecoder.
  *
  * Data is decoded on demand in whatever format is requested. The format is
