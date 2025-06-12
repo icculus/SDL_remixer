@@ -1727,7 +1727,7 @@ void MIX_UntagTrack(MIX_Track *track, const char *tag)
                 if (list->tracks[i] == track) {
                     const size_t cpy = (list->num_tracks - (i+1)) * sizeof (*list->tracks);
                     if (cpy) {
-                        SDL_memmove(&list->tracks[i], list->tracks[i+1], cpy);
+                        SDL_memmove(&list->tracks[i], &list->tracks[i+1], cpy);
                     }
                     list->tracks[--list->num_tracks] = NULL;
                     break;
