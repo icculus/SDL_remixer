@@ -1708,7 +1708,7 @@ bool MIX_TagTrack(MIX_Track *track, const char *tag)
 
 void MIX_UntagTrack(MIX_Track *track, const char *tag)
 {
-    if (CheckTrackTagParam(track, tag)) {
+    if (!CheckTrackTagParam(track, tag)) {
         return;  // do nothing.
     }
 
