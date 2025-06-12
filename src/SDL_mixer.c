@@ -1725,7 +1725,7 @@ void MIX_UntagTrack(MIX_Track *track, const char *tag)
             SDL_LockRWLockForWriting(list->rwlock);
             for (size_t i = 0; i < list->num_tracks; i++) {
                 if (list->tracks[i] == track) {
-                    const size_t cpy = (list->num_tracks - i) * sizeof (*list->tracks);
+                    const size_t cpy = (list->num_tracks - (i+1)) * sizeof (*list->tracks);
                     if (cpy) {
                         SDL_memmove(&list->tracks[i], list->tracks[i+1], cpy);
                     }
