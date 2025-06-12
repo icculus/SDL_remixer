@@ -1720,7 +1720,7 @@ void MIX_UntagTrack(MIX_Track *track, const char *tag)
             const SDL_PropertiesID track_tags = track->mixer->track_tags;
             SDL_assert(track_tags != 0);
             MIX_TagList *list = (MIX_TagList *) SDL_GetPointerProperty(track_tags, tag, NULL);
-            SDL_assert(list != NULL);  // shouldn't be NULL, there's definitely an track with this tag!
+            SDL_assert(list != NULL);  // shouldn't be NULL, there's definitely a track with this tag!
 
             SDL_LockRWLockForWriting(list->rwlock);
             for (size_t i = 0; i < list->num_tracks; i++) {
