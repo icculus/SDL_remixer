@@ -43,7 +43,7 @@
     MIX_LOADER_FUNCTION(true,const OpusHead *,op_head,(const OggOpusFile *,int)) \
     MIX_LOADER_FUNCTION(true,int,op_seekable,(const OggOpusFile *)) \
     MIX_LOADER_FUNCTION(true,int,op_read_float,(OggOpusFile *, float *,int,int *)) \
-    MIX_LOADER_FUNCTION(true,int,op_raw_seek,(OggOpusFile *,ogg_int64_t)) \
+    MIX_LOADER_FUNCTION(true,int,op_raw_seek,(OggOpusFile *,opus_int64)) \
     MIX_LOADER_FUNCTION(true,int,op_pcm_seek,(OggOpusFile *,ogg_int64_t)) \
     MIX_LOADER_FUNCTION(true,ogg_int64_t,op_pcm_tell,(const OggOpusFile *)) \
     MIX_LOADER_FUNCTION(true,ogg_int64_t,op_pcm_total,(const OggOpusFile *, int)) \
