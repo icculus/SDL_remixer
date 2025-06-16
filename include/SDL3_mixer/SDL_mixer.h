@@ -2245,9 +2245,9 @@ extern SDL_DECLSPEC bool SDLCALL MIX_SetTrackStereo(MIX_Track *track, const MIX_
  */
 typedef struct MIX_Point3D
 {
-    float x;  /** X coordinate (negative left, positive right). */
-    float y;  /** Y coordinate (negative down, positive up). */
-    float z;  /** Z coordinate (negative forward, positive back). */
+    float x;  /**< X coordinate (negative left, positive right). */
+    float y;  /**< Y coordinate (negative down, positive up). */
+    float z;  /**< Z coordinate (negative forward, positive back). */
 } MIX_Point3D;
 
 /**
