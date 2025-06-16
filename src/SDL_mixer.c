@@ -391,8 +391,8 @@ static void SDLCALL TrackGetCallback(void *userdata, SDL_AudioStream *stream, in
 
             // if this would put us past the end of maxframes, or a fadeout, clamp br and set end_of_audio=true so we can do looping, etc.
             Sint64 maxpos = -1;
-            if (track->max_frames >= 0) {
-                maxpos = track->max_frames;
+            if (track->max_frame >= 0) {
+                maxpos = track->max_frame;
             }
             if (track->fade_direction < 0) {
                 const Sint64 maxfadepos = (Sint64) (track->position + track->fade_frames);
@@ -615,7 +615,7 @@ static void SDLCALL MixerCallback(void *userdata, SDL_AudioStream *stream, int a
     SDL_PutAudioStreamData(stream, final_mixbuf, additional_amount);
 }
 
-bool MIX_Generate(MIX_Mixer *mixer, float *buffer, int buflen)
+bool MIX_Generate(MIX_Mixer *mixer, void *buffer, int buflen)
 {
     if (!CheckMixerParam(mixer)) {
         return false;
@@ -1573,11 +1573,14 @@ bool MIX_SetTrackAudioStream(MIX_Track *track, SDL_AudioStream *stream)
         }
     }
 
-    SDL_AudioSpec spec;
-    SDL_GetAudioStreamFormat(stream, &spec, NULL);
-    spec.format = SDL_AUDIO_F32;  // we always work in float32.
-    SDL_SetAudioStreamFormat(stream, NULL, &spec);                 // input is whatever, output is whatever in float format.
-    SetTrackOutputStreamFormat(track, &spec);   // input is whatever in float format, output is to mixer->output_stream (or, if spatializing, to mixer->output_stream but mono).
+    if (stream) {
+        SDL_AudioSpec spec;
+        SDL_GetAudioStreamFormat(stream, &spec, NULL);
+        spec.format = SDL_AUDIO_F32;  // we always work in float32.
+        SDL_SetAudioStreamFormat(stream, NULL, &spec);                 // input is whatever, output is whatever in float format.
+        SetTrackOutputStreamFormat(track, &spec);   // input is whatever in float format, output is to mixer->output_stream (or, if spatializing, to mixer->output_stream but mono).
+    }
+
     track->input_stream = stream;
     track->position = 0;
     UnlockTrack(track);
@@ -1590,7 +1593,7 @@ bool MIX_SetTrackIOStream(MIX_Track *track, SDL_IOStream *io, bool closeio)
     if (!CheckTrackParam(track)) {
         return false;
     } else if (!io) {
-        return SDL_InvalidParamError("io");
+        return MIX_SetTrackAudio(track, NULL);  // just drop the current input.
     }
 
     const SDL_PropertiesID props = SDL_CreateProperties();
@@ -1785,8 +1788,11 @@ Sint64 MIX_GetTrackRemaining(MIX_Track *track)
         LockTrack(track);
         const Sint64 position = (Sint64) track->position;
         const Sint64 duration = track->input_audio ? track->input_audio->duration_frames : -1;
+        const bool stopped = (track->state == MIX_STATE_STOPPED);
         UnlockTrack(track);
-        if ((duration >= 0) && (position >= 0) && (position <= duration)) {
+        if (stopped) {
+            retval = 0;
+        } else if ((duration >= 0) && (position >= 0) && (position <= duration)) {
             retval = duration - position;
         }
     }
@@ -1798,7 +1804,7 @@ bool MIX_TrackLooping(MIX_Track *track)
     bool retval = false;
     if (CheckTrackParam(track)) {
         LockTrack(track);
-        retval = (track->loops_remaining != 0);
+        retval = ((track->state != MIX_STATE_STOPPED) && (track->loops_remaining != 0));
         UnlockTrack(track);
     }
     return retval;
@@ -1828,11 +1834,17 @@ SDL_AudioStream *MIX_GetTrackAudioStream(MIX_Track *track)
 
 Uint64 MIX_MSToFrames(int sample_rate, Uint64 ms)
 {
+    if (sample_rate <= 0) {
+        return 0;
+    }
     return (Uint64) ((((double) ms) / 1000.0) * ((double) sample_rate));
 }
 
 Uint64 MIX_FramesToMS(int sample_rate, Uint64 frames)
 {
+    if (sample_rate <= 0) {
+        return 0;
+    }
     return (Uint64) ((((double) frames) / ((double) sample_rate)) * 1000.0);
 }
 
@@ -1895,7 +1907,8 @@ static Sint64 GetTrackOptionFramesOrTicks(MIX_Track *track, SDL_PropertiesID opt
     if (SDL_HasProperty(options, framesprop)) {
         return SDL_GetNumberProperty(options, framesprop, defval);
     } else if (SDL_HasProperty(options, msprop)) {
-        return MIX_TrackMSToFrames(track, SDL_GetNumberProperty(options, msprop, defval));
+        const Sint64 val = SDL_GetNumberProperty(options, msprop, defval);
+        return (val < 0) ? val : MIX_TrackMSToFrames(track, val);
     }
     return defval;
 }
@@ -1909,7 +1922,7 @@ bool MIX_PlayTrack(MIX_Track *track, SDL_PropertiesID options)
     }
 
     int loops = 0;
-    Sint64 max_frames = -1;
+    Sint64 max_frame = -1;
     Sint64 start_pos = 0;
     Sint64 loop_start = 0;
     Sint64 fade_in = 0;
@@ -1917,11 +1930,23 @@ bool MIX_PlayTrack(MIX_Track *track, SDL_PropertiesID options)
     LockTrack(track);
     if (options) {
         loops = (int) SDL_GetNumberProperty(options, MIX_PROP_PLAY_LOOPS_NUMBER, loops);
-        max_frames = GetTrackOptionFramesOrTicks(track, options, MIX_PROP_PLAY_MAX_FRAMES_NUMBER, MIX_PROP_PLAY_MAX_MILLISECONDS_NUMBER, max_frames);
+        max_frame = GetTrackOptionFramesOrTicks(track, options, MIX_PROP_PLAY_MAX_FRAME_NUMBER, MIX_PROP_PLAY_MAX_MILLISECONDS_NUMBER, max_frame);
         start_pos = GetTrackOptionFramesOrTicks(track, options, MIX_PROP_PLAY_START_FRAME_NUMBER, MIX_PROP_PLAY_START_MILLISECOND_NUMBER, start_pos);
         loop_start = GetTrackOptionFramesOrTicks(track, options, MIX_PROP_PLAY_LOOP_START_FRAME_NUMBER, MIX_PROP_PLAY_LOOP_START_MILLISECOND_NUMBER, loop_start);
         fade_in = GetTrackOptionFramesOrTicks(track, options, MIX_PROP_PLAY_FADE_IN_FRAMES_NUMBER, MIX_PROP_PLAY_FADE_IN_MILLISECONDS_NUMBER, fade_in);
         append_silence_frames = GetTrackOptionFramesOrTicks(track, options, MIX_PROP_PLAY_APPEND_SILENCE_FRAMES_NUMBER, MIX_PROP_PLAY_APPEND_SILENCE_MILLISECONDS_NUMBER, append_silence_frames);
+    }
+
+    if (start_pos < 0) {
+        start_pos = 0;
+    }
+
+    if (loop_start < 0) {
+        loop_start = 0;
+    }
+
+    if (append_silence_frames < 0) {
+        append_silence_frames = 0;
     }
 
     if (track->input_audio && (!track->input_audio->decoder->seek(track->decoder_userdata, start_pos))) {
@@ -1932,7 +1957,7 @@ bool MIX_PlayTrack(MIX_Track *track, SDL_PropertiesID options)
         return SDL_SetError("Playing an input stream (not MIX_Audio) with a non-zero start position");  // !!! FIXME: should we just read off this many frames right now instead?
     }
 
-    track->max_frames = max_frames;
+    track->max_frame = max_frame;
     track->loops_remaining = loops;
     track->loop_start = loop_start;
     track->total_fade_frames = (fade_in > 0) ? fade_in : 0;
@@ -2032,17 +2057,17 @@ static void StopTrack(MIX_Track *track, Sint64 fadeOut)
     UnlockTrack(track);
 }
 
-bool MIX_StopTrack(MIX_Track *track, Sint64 fadeOut)
+bool MIX_StopTrack(MIX_Track *track, Sint64 fade_out_frames)
 {
     if (!CheckTrackParam(track)) {
         return false;
     }
 
-    StopTrack(track, fadeOut);
+    StopTrack(track, fade_out_frames);
     return true;
 }
 
-bool MIX_StopAllTracks(MIX_Mixer *mixer, Sint64 fadeOut)
+bool MIX_StopAllTracks(MIX_Mixer *mixer, Sint64 fade_out_ms)
 {
     if (!CheckMixerParam(mixer)) {
         return false;
@@ -2051,7 +2076,7 @@ bool MIX_StopAllTracks(MIX_Mixer *mixer, Sint64 fadeOut)
     LockMixer(mixer);  // lock the mixer so all tracks stop at the same time.
 
     for (MIX_Track *track = mixer->all_tracks; track != NULL; track = track->next) {
-        StopTrack(track, (fadeOut > 0) ? MIX_TrackMSToFrames(track, fadeOut) : -1);
+        StopTrack(track, (fade_out_ms > 0) ? MIX_TrackMSToFrames(track, fade_out_ms) : -1);
     }
 
     UnlockMixer(mixer);
@@ -2059,7 +2084,7 @@ bool MIX_StopAllTracks(MIX_Mixer *mixer, Sint64 fadeOut)
     return true;
 }
 
-bool MIX_StopTag(MIX_Mixer *mixer, const char *tag, Sint64 fadeOut)
+bool MIX_StopTag(MIX_Mixer *mixer, const char *tag, Sint64 fade_out_ms)
 {
     if (!CheckMixerTagParam(mixer, tag)) {
         return false;
@@ -2074,7 +2099,7 @@ bool MIX_StopTag(MIX_Mixer *mixer, const char *tag, Sint64 fadeOut)
 
     const size_t total = list->num_tracks;
     for (size_t i = 0; i < total; i++) {
-        StopTrack(list->tracks[i], (fadeOut > 0) ? MIX_TrackMSToFrames(list->tracks[i], fadeOut) : -1);
+        StopTrack(list->tracks[i], (fade_out_ms > 0) ? MIX_TrackMSToFrames(list->tracks[i], fade_out_ms) : -1);
     }
 
     SDL_UnlockRWLock(list->rwlock);
@@ -2352,7 +2377,7 @@ bool MIX_SetTrackFrequencyRatio(MIX_Track *track, float ratio)
 float MIX_GetTrackFrequencyRatio(MIX_Track *track)
 {
     if (!CheckTrackParam(track)) {
-        return 1.0f;
+        return 0.0f;
     }
 
     // don't have to LockTrack, as SDL_GetAudioStreamFrequencyRatio will do that.

@@ -156,7 +156,7 @@ struct MIX_Track
     MIX_TrackState state;  // playing, paused, stopped.
     Uint64 position;   // sample frames played from start of file.
     Sint64 silence_frames;  // number of frames of silence to mix at the end of the track.
-    Sint64 max_frames;   // consider audio at EOF after this many sample frames.
+    Sint64 max_frame;   // consider audio at EOF at this many sample frame position.
     bool fire_and_forget;  // true if this is a MIX_Track managed internally for fire-and-forget playback.
     Sint64 total_fade_frames;  // fade in or out for this many sample frames.
     Sint64 fade_frames;  // remaining frames to fade.
@@ -223,9 +223,6 @@ struct MIX_Mixer
 #define MIX_PROP_DECODER_FLUIDSYNTH_SOUNDFONT_PATH_STRING "SDL_mixer.decoder.fluidsynth.soundfont_path"
 #define MIX_PROP_AUDIO_LOAD_PATH_STRING "SDL_mixer.audio.load.path"
 #define MIX_PROP_AUDIO_LOAD_ONDEMAND_BOOLEAN "SDL_mixer.audio.load.ondemand"
-
-#define MIX_DURATION_UNKNOWN -1
-#define MIX_DURATION_INFINITE -2
 
 typedef struct MIX_TagList
 {
