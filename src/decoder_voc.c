@@ -21,391 +21,571 @@
 
 #ifdef DECODER_VOC
 
+// https://moddingwiki.shikadi.net/wiki/VOC_Format
+
 #include "SDL_mixer_internal.h"
 
-// Private data for VOC file
-typedef struct vocstate {
-    Uint32  rest;           // bytes remaining in current block
-    Uint32  rate;           // rate code (byte) of this chunk
-    bool    silent;         // sound or silence?
-    Uint32  srate;          // rate code (byte) of silence
-    Uint32  blockseek;      // start of current output block
-    Uint32  samples;        // number of samples output
-    Uint32  size;           // word length of data
-    Uint8   channels;       // number of sound channels
-    bool    has_extended;   // Has an extended block been read?
-} vs_t;
+#define VOC_TERM     0
+#define VOC_DATA     1
+#define VOC_CONT     2
+#define VOC_SILENCE  3
+#define VOC_MARKER   4
+#define VOC_TEXT     5
+#define VOC_LOOP     6
+#define VOC_LOOPEND  7
+#define VOC_EXTENDED 8
+#define VOC_DATA_16  9
 
-// Size field
-// SJB: note that the 1st 3 are sometimes used as sizeof(type)
-#define ST_SIZE_BYTE    1
-#define ST_SIZE_8BIT    1
-#define ST_SIZE_WORD    2
-#define ST_SIZE_16BIT   2
-#define ST_SIZE_DWORD   4
-#define ST_SIZE_32BIT   4
-#define ST_SIZE_FLOAT   5
-#define ST_SIZE_DOUBLE  6
-#define ST_SIZE_IEEE    7   // IEEE 80-bit floats.
-
-// Style field
-#define ST_ENCODING_UNSIGNED    1 // unsigned linear: Sound Blaster
-#define ST_ENCODING_SIGN2       2 // signed linear 2's comp: Mac
-#define ST_ENCODING_ULAW        3 // U-law signed logs: US telephony, SPARC
-#define ST_ENCODING_ALAW        4 // A-law signed logs: non-US telephony
-#define ST_ENCODING_ADPCM       5 // Compressed PCM
-#define ST_ENCODING_IMA_ADPCM   6 // Compressed PCM
-#define ST_ENCODING_GSM         7 // GSM 6.10 33-byte frame lossy compression
-
-#define VOC_TERM        0
-#define VOC_DATA        1
-#define VOC_CONT        2
-#define VOC_SILENCE     3
-#define VOC_MARKER      4
-#define VOC_TEXT        5
-#define VOC_LOOP        6
-#define VOC_LOOPEND     7
-#define VOC_EXTENDED    8
-#define VOC_DATA_16     9
-
-#define VOC_BAD_RATE  ~((Uint32)0)
-
-static bool voc_check_header(SDL_IOStream *src)
+typedef struct VOC_Block
 {
-    // VOC magic header
-    Uint8  signature[20];  // "Creative Voice File\032"
-    Uint16 datablockofs;
+    int loop_count;  // 0=data or silence block, >0=loop block of X loops, -1=infinite loop block, -2=endloop block.
+    Uint64 iopos;  // byte position in i/o stream of this block's data. Might be 0 for things like loop and silence blocks.
+    SDL_AudioSpec spec;
+    Uint64 frames;
+} VOC_Block;
 
-    SDL_SeekIO(src, 0, SDL_IO_SEEK_SET);
+typedef struct VOC_AudioData
+{
+    VOC_Block *blocks;
+    size_t num_blocks;
+} VOC_AudioData;
 
-    if (SDL_ReadIO(src, signature, sizeof(signature)) != sizeof(signature)) {
-        return false;
+typedef struct VOC_TrackData
+{
+    const VOC_AudioData *adata;
+    SDL_IOStream *io;
+    SDL_AudioSpec spec;
+    size_t current_block;
+    size_t frame_pos;
+    const VOC_Block *loop_start;
+    int loop_count;
+} VOC_TrackData;
+
+
+static VOC_Block *AddVocBlock(VOC_AudioData *adata)
+{
+    void *ptr = SDL_realloc(adata->blocks, (adata->num_blocks + 1) * sizeof (*adata->blocks));
+    if (!ptr) {
+        return NULL;
     }
 
-    if (SDL_memcmp(signature, "Creative Voice File\032", sizeof(signature)) != 0) {
-        return SDL_SetError("Unrecognized file type (not VOC)");
-    }
-
-    // get the offset where the first datablock is located
-    if (SDL_ReadIO(src, &datablockofs, sizeof(Uint16)) != sizeof(Uint16)) {
-        return false;
-    }
-
-    datablockofs = SDL_Swap16LE(datablockofs);
-
-    if (SDL_SeekIO(src, datablockofs, SDL_IO_SEEK_SET) != datablockofs) {
-        return false;
-    }
-
-    return true;  // success!
+    adata->blocks = (VOC_Block *) ptr;
+    VOC_Block *block = &adata->blocks[adata->num_blocks];
+    SDL_zerop(block);
+    adata->num_blocks++;
+    return block;
 }
 
-// Read next block header, save info, leave position at start of data
-static bool voc_get_block(SDL_IOStream *src, vs_t *v, SDL_AudioSpec *spec)
+static VOC_Block *AddVocDataBlock(VOC_AudioData *adata, Sint64 iopos, const SDL_AudioSpec *spec, Uint64 frames)
 {
-    Uint8 bits24[3];
-    Uint8 uc, block;
-    Uint32 sblen;
-    Uint16 new_rate_short;
-    Uint32 new_rate_long;
-    Uint8 trash[6];
-    Uint16 period;
-    unsigned int i;
+    if (iopos < 0) {  // SDL_TellIO failed?
+        return NULL;
+    }
 
-    v->silent = 0;
-    while (v->rest == 0) {
-        if (SDL_ReadIO(src, &block, sizeof(block)) != sizeof(block)) {
-            return true;  // assume that's the end of the file.
+    VOC_Block *block = AddVocBlock(adata);
+    block->iopos = (Uint64) iopos;
+    block->loop_count = 0;
+    SDL_copyp(&block->spec, spec);
+    block->frames = frames;
+    return block;
+}
+
+static VOC_Block *AddVocLoopBlock(VOC_AudioData *adata, int loop_count)
+{
+    VOC_Block *block = AddVocBlock(adata);
+    if (block) {
+        block->loop_count = loop_count;
+    }
+    return block;
+}
+
+
+// this runs during VOC_audio_init to walk the whole .VOC for metadata and sanity checks.
+static bool ParseVocFile(SDL_IOStream *io, VOC_AudioData *adata, SDL_PropertiesID props, SDL_AudioSpec *spec, Sint64 *duration_frames)
+{
+    Sint64 total_frames = 0;
+    VOC_Block *loop_start = NULL;
+    Sint64 loop_frames = 0;
+    SDL_AudioSpec original_spec;
+    SDL_AudioSpec current_spec;
+    int text_count = 0;
+
+    Sint64 pos = SDL_TellIO(io);
+    if (pos < 0) {
+        return false;
+    }
+
+    SDL_copyp(&original_spec, spec);
+    SDL_copyp(&current_spec, spec);
+    spec->format = SDL_AUDIO_UNKNOWN;
+
+    while (true) {
+        Uint8 block;
+        Uint32 blen = 0;
+        if (SDL_ReadIO(io, &block, 1) != 1) {
+            return true;   // assume that's the end of the file.
+        } else if (block == VOC_TERM) {
+            return true;  // that's the (optional) end.
+        } else if (block != VOC_LOOPEND) {  // TERM and LOOPEND don't have a size field.
+            Uint8 bits24[3];
+            if (SDL_ReadIO(io, bits24, sizeof(bits24)) != sizeof(bits24)) {
+                return false;
+            }
+            // Size is a 24-bit value. Ugh.
+            blen = (Uint32)((bits24[0]) | (bits24[1] << 8) | (bits24[2] << 16));
         }
 
-        if (block == VOC_TERM) {
-            return true;
+        pos++;
+        if ((block != VOC_TERM) && (block != VOC_LOOPEND)) {
+            pos += 3;  // size fields on everything but VOC_TERM and VOC_LOOPEND.
         }
 
-        if (SDL_ReadIO(src, bits24, sizeof(bits24)) != sizeof(bits24)) {
-            return true;  // assume that's the end of the file.
-        }
-
-        // Size is an 24-bit value. Ugh.
-        sblen = (Uint32)((bits24[0]) | (bits24[1] << 8) | (bits24[2] << 16));
-
-        switch(block) {
-            case VOC_DATA:
-                if (SDL_ReadIO(src, &uc, sizeof(uc)) != sizeof(uc)) {
+        switch (block) {
+            case VOC_DATA: {
+                Uint8 codec, rateu8;
+                if (SDL_ReadIO(io, &rateu8, 1) != 1) {
+                    return false;
+                } else if (SDL_ReadIO(io, &codec, 1) != 1) {
                     return false;
                 }
 
-                // When DATA block preceeded by an EXTENDED
-                // block, the DATA blocks rate value is invalid
-                if (!v->has_extended) {
-                    if (uc == 0) {
-                        return SDL_SetError("VOC Sample rate is zero?");
-                    }
-
-                    if ((v->rate != VOC_BAD_RATE) && (uc != v->rate)) {
-                        return SDL_SetError("VOC sample rate codes differ");
-                    }
-
-                    v->rate = uc;
-                    spec->freq = (Uint16)(1000000.0/(256 - v->rate));
-                    v->channels = 1;
+                if ((codec != 0) && (codec != 4)) {  // !!! FIXME: there are other formats (adpcm, etc), but we don't support them at the moment.
+                    return SDL_SetError("Unsupported VOC data format");
                 }
 
-                if (SDL_ReadIO(src, &uc, sizeof(uc)) != sizeof(uc)) {
+                current_spec.freq = (int) (1000000 / (256 - rateu8));
+                current_spec.channels = 1;
+                current_spec.format = (codec == 0) ? SDL_AUDIO_U8 : SDL_AUDIO_S16LE;
+
+                const int framelen = SDL_AUDIO_FRAMESIZE(current_spec);
+                const Uint64 frames = (Uint64) ((blen - 2) / framelen);
+                if (!AddVocDataBlock(adata, SDL_TellIO(io), &current_spec, frames)) {
                     return false;
                 }
 
-                if (uc != 0) {
-                    return SDL_SetError("VOC decoder only interprets 8-bit data");
+                if (spec->format == SDL_AUDIO_UNKNOWN) {  // take the first thing as the "official" spec, but this can change later.
+                    SDL_copyp(spec, &current_spec);
                 }
 
-                v->has_extended = false;
-                v->rest = sblen - 2;
-                v->size = ST_SIZE_BYTE;
-                return true;
+                if (total_frames != -1) {
+                    loop_frames += frames;
+                }
 
-            case VOC_DATA_16:
-                if (SDL_ReadIO(src, &new_rate_long, sizeof(new_rate_long)) != sizeof(new_rate_long)) {
+                break;
+            }
+
+            case VOC_DATA_16: {
+                Uint32 rate32;
+                if (!SDL_ReadU32LE(io, &rate32)) {
+                    return false;
+                } else if (rate32 == 0) {
+                    return SDL_SetError("VOC sample rate is zero?");
+                }
+
+                Uint8 bits, channels, codec;
+                if (SDL_ReadIO(io, &bits, 1) != 1) {
+                    return false;
+                } else if ((bits != 8) && (bits != 16)) {
+                    return SDL_SetError("Unsupported VOC data format");
+                } else if (SDL_ReadIO(io, &channels, 1) != 1) {   // I assume you have mono or stereo, but we'll let you go wild with whatever.
+                    return false;
+                } else if (SDL_ReadIO(io, &codec, 1) != 1) {
+                    return false;
+                } else if ((codec != 0) && (codec != 4)) {  // !!! FIXME: there are other formats (adpcm, etc), but we don't support them at the moment.
+                    return SDL_SetError("Unsupported VOC data format");
+                } else if (((codec == 0) && (bits != 8)) || ((codec == 4) && (bits != 16))) {
+                    return SDL_SetError("Corrupt VOC data");
+                }
+
+                current_spec.freq = (int) rate32;
+                current_spec.channels = (int) channels;
+                current_spec.format = (codec == 0) ? SDL_AUDIO_U8 : SDL_AUDIO_S16LE;
+
+                const int framelen = SDL_AUDIO_FRAMESIZE(current_spec);
+                const Uint64 frames = (Uint64) ((blen - 12) / framelen);
+                if (!AddVocDataBlock(adata, SDL_TellIO(io), &current_spec, frames)) {
                     return false;
                 }
-                new_rate_long = SDL_Swap32LE(new_rate_long);
-                if (new_rate_long == 0) {
-                    return SDL_SetError("VOC Sample rate is zero?");
-                }
-                if ((v->rate != VOC_BAD_RATE) && (new_rate_long != v->rate)) {
-                    return SDL_SetError("VOC sample rate codes differ");
-                }
-                v->rate = new_rate_long;
-                spec->freq = (int)new_rate_long;
 
-                if (SDL_ReadIO(src, &uc, sizeof(uc)) != sizeof(uc)) {
+                if (spec->format == SDL_AUDIO_UNKNOWN) {  // take the first thing as the "official" spec, but this can change later.
+                    SDL_copyp(spec, &current_spec);
+                }
+
+                if (total_frames != -1) {
+                    loop_frames += frames;
+                }
+
+                break;
+            }
+
+            case VOC_CONT: {
+                if (spec->format == SDL_AUDIO_UNKNOWN) {
+                    return SDL_SetError("VOC continuation block before a data type is set.");
+                }
+
+                const int framelen = SDL_AUDIO_FRAMESIZE(current_spec);
+                const Uint64 frames = (Uint64) (blen / framelen);
+                if (!AddVocDataBlock(adata, SDL_TellIO(io), &current_spec, frames)) {
                     return false;
                 }
 
-                switch (uc) {
-                    case 8:  v->size = ST_SIZE_BYTE; break;
-                    case 16: v->size = ST_SIZE_WORD; break;
-                    default:
-                        return SDL_SetError("VOC with unknown data size");
-                }
-
-                if (SDL_ReadIO(src, &v->channels, sizeof(Uint8)) != sizeof(Uint8)) {
-                    return false;
-                }
-
-                if (SDL_ReadIO(src, trash, 6) != 6) {
-                    return false;
-                }
-
-                v->rest = sblen - 12;
-                return true;
-
-            case VOC_CONT:
-                v->rest = sblen;
-                return true;
-
-            case VOC_SILENCE:
-                if (SDL_ReadIO(src, &period, sizeof(period)) != sizeof(period)) {
-                    return false;
-                }
-                period = SDL_Swap16LE(period);
-
-                if (SDL_ReadIO(src, &uc, sizeof(uc)) != sizeof(uc)) {
-                    return false;
-                }
-                if (uc == 0) {
-                    return SDL_SetError("VOC silence sample rate is zero");
-                }
-
-                // Some silence-packed files have gratuitously
-                // different sample rate codes in silence.
-                // Adjust period.
-                if ((v->rate != VOC_BAD_RATE) && (uc != v->rate))
-                    period = (Uint16)((period * (256 - uc))/(256 - v->rate));
-                else
-                    v->rate = uc;
-                v->rest = period;
-                v->silent = 1;
-                return true;
-
-            case VOC_LOOP:  // !!! FIXME: is this meant to repeat a prior data/silence block?
-            case VOC_LOOPEND:
-                for (i = 0; i < sblen; i++) {  // skip repeat loops.
-                    if (SDL_ReadIO(src, trash, sizeof(Uint8)) != sizeof(Uint8)) {
-                        return false;
-                    }
+                if (total_frames != -1) {
+                    loop_frames += frames;
                 }
                 break;
+            }
 
-            case VOC_EXTENDED:
-                // An Extended block is followed by a data block
-                // Set this byte so we know to use the rate
-                // value from the extended block and not the
-                // data block.
-                v->has_extended = true;
-                if (SDL_ReadIO(src, &new_rate_short, sizeof(new_rate_short)) != sizeof(new_rate_short)) {
+            case VOC_SILENCE: {  // it's okay if we haven't set an initial format yet, we'll know it when we get there later.
+                // technically we could try to add this to an existing silence block, but in practice these are rare, and duplicate blocks probably more so.
+                Uint16 frames;
+                if (!SDL_ReadU16LE(io, &frames)) {
                     return false;
-                }
-                new_rate_short = SDL_Swap16LE(new_rate_short);
-                if (new_rate_short == 0) {
-                   return SDL_SetError("VOC sample rate is zero");
-                }
-                if ((v->rate != VOC_BAD_RATE) && (new_rate_short != v->rate)) {
-                   return SDL_SetError("VOC sample rate codes differ");
-                }
-                v->rate = new_rate_short;
-
-                if (SDL_ReadIO(src, &uc, sizeof(uc)) != sizeof(uc)) {
+                } else if (!AddVocDataBlock(adata, 0, &current_spec, frames + 1)) {
                     return false;
                 }
 
-                if (uc != 0) {
-                    return SDL_SetError("VOC decoder only interprets 8-bit data");
+                if (total_frames != -1) {
+                    loop_frames += frames + 1;
                 }
+                break;
+            }
 
-                if (SDL_ReadIO(src, &uc, sizeof(uc)) != sizeof(uc)) {
+            case VOC_LOOP: {
+                Uint16 iterations = 0;
+
+                // !!! FIXME: can LOOP/LOOPEND sections nest? https://moddingwiki.shikadi.net/wiki/VOC_Format suggests no, saying LOOPEND goes back to _most recent_ LOOP start.
+                if (loop_start) {
+                    return SDL_SetError("VOC has nested loop");
+                } else if (!SDL_ReadU16LE(io, &iterations)) {
                     return false;
                 }
 
-                if (uc) { // Stereo
-                    spec->channels = 2;
-                // VOC_EXTENDED may be read before spec->channels inited:
+                int loop_count = -1;
+                if (iterations == 0xFFFF) {
+                    total_frames = -1;   // it's infinite.
                 } else {
-                    spec->channels = 1;
+                    loop_count = ((int) iterations) + 1;
                 }
 
-                // Needed number of channels before finishing compute for rate
-                spec->freq = (256000000L / (65536L - v->rate)) / spec->channels;
-                // An extended block must be followed by a data
-                // block to be valid so loop back to top so it
-                // can be grabbed.
-                continue;
+                if (total_frames != -1) {
+                    total_frames += loop_frames;   // add in anything that's accumulated until now.
+                }
 
-            case VOC_MARKER:
-                if (SDL_ReadIO(src, trash, 2) != 2) {
+                loop_frames = 0;
+
+                loop_start = AddVocLoopBlock(adata, loop_count);
+                if (!loop_start) {
                     return false;
                 }
-                SDL_FALLTHROUGH;
+                break;
+            }
 
-            // !!! FIXME: should we publish text blocks as metadata?
-            default:  // text block or other unsupported/unimportant stuff.
-                for (i = 0; i < sblen; i++) {
-                    if (SDL_ReadIO(src, trash, sizeof(Uint8)) != sizeof(Uint8)) {
+            case VOC_LOOPEND: {
+                if (!loop_start) {
+                    return SDL_SetError("VOC has a LOOPEND without a matching LOOP");
+                }
+
+                VOC_Block *block = AddVocLoopBlock(adata, -2);
+                if (!block) {
+                    return false;
+                }
+
+                if (total_frames != -1) {
+                    total_frames += loop_frames * loop_start->loop_count;
+                }
+
+                loop_start = NULL;
+                loop_frames = 0;
+                break;
+            }
+
+            case VOC_EXTENDED: {
+                Uint16 rateu16;
+                Uint8 codec, channelsu8;
+                if (!SDL_ReadU16LE(io, &rateu16)) {
+                    return false;
+                } else if (SDL_ReadIO(io, &codec, 1) != 1) {
+                    return false;
+                } else if ((codec != 0) && (codec != 4)) {  // !!! FIXME: there are other formats (adpcm, etc), but we don't support them at the moment.
+                    return SDL_SetError("Unsupported VOC data format");
+                } else if (SDL_ReadIO(io, &channelsu8, 1) != 1) {
+                    return false;
+                }
+
+                const int channels = ((int) channelsu8) + 1;
+                current_spec.freq = (256000000 / (channels * (65536 - rateu16)));
+                current_spec.channels = channels;
+                current_spec.format = (codec == 0) ? SDL_AUDIO_U8 : SDL_AUDIO_S16LE;
+
+                if (spec->format == SDL_AUDIO_UNKNOWN) {
+                    SDL_copyp(spec, &current_spec);
+                }
+
+                break;
+            }
+
+            case VOC_TEXT: {
+                char *value = (char *) SDL_malloc(blen);
+                if (value) {  // oh well if we ran out of memory.
+                    if (SDL_ReadIO(io, value, blen) != blen) {
                         return false;
                     }
+                    char *utf8 = SDL_iconv_string("UTF-8", "ISO-8859-1", value, blen);
+                    if (utf8) {
+                        char key[64];
+                        SDL_snprintf(key, sizeof (key), "SDL_mixer.metadata.voc.text%d", text_count);
+                        SDL_SetStringProperty(props, key, utf8);
+                        SDL_free(utf8);
+                        text_count++;
+                    }
+                    SDL_free(value);
                 }
+                break;
+            }
 
-                if (block == VOC_TEXT) {
-                    continue;    // get next block
-                }
+            // just skip these.
+            //case VOC_MARKER:
+            default:
+                break;
+        }
+
+        pos += blen;
+        if (SDL_SeekIO(io, pos, SDL_IO_SEEK_SET) < 0) {
+            return false;
         }
     }
+
+    if (loop_start) {  // !!! FIXME: should we just treat EOF as the loop end in this case?
+        return SDL_SetError("VOC has a LOOP without a matching LOOPEND");
+    }
+
+    if (spec->format == SDL_AUDIO_UNKNOWN) {  // theoretically this can happen if you only have VOC_SILENCE blocks. Set it to the original device format.
+        SDL_copyp(spec, &original_spec);
+    }
+
+    if (total_frames != -1) {
+        total_frames += loop_frames;
+    }
+
+    *duration_frames = total_frames;
 
     return true;
 }
 
-static Uint32 voc_read(SDL_IOStream *src, vs_t *v, Uint8 *buf, SDL_AudioSpec *spec)
+static bool SDLCALL VOC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
-    Sint64 done = 0;
-
-    if (v->rest == 0) {
-        if (!voc_get_block(src, v, spec) || (v->rest == 0)) {
-            return 0;
-        }
+    // just load the bare minimum from the IOStream to verify it's a .VOC file.
+    char magic[20];
+    if (SDL_ReadIO(io, magic, 20) != 20) {
+        return false;
+    } else if (SDL_memcmp(magic, "Creative Voice File\032", 20) != 0) {
+        return SDL_SetError("Not a VOC audio stream");
     }
 
-    if (v->silent) {
-        // Fill in silence
-        SDL_memset(buf, (v->size == ST_SIZE_WORD) ? 0x00 : 0x80, v->rest);
-        done = v->rest;
-        v->rest = 0;
+    // now jump to the data and prepare to parse everything out.
+    Uint16 datablockpos;
+    if (!SDL_ReadU16LE(io, &datablockpos)) {
+        return false;
+    } else if (SDL_SeekIO(io, datablockpos, SDL_IO_SEEK_SET) < 0) {
+        return false;
+    }
+
+    VOC_AudioData *adata = (VOC_AudioData *) SDL_calloc(1, sizeof(*adata));
+    if (!adata) {
+        return false;
+    } else if (!ParseVocFile(io, adata, props, spec, duration_frames)) {
+        SDL_free(adata->blocks);
+        SDL_free(adata);
+        return false;
+    }
+
+    *audio_userdata = adata;
+
+    return true;
+}
+
+bool SDLCALL VOC_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_AudioSpec *spec, SDL_PropertiesID props, void **userdata)
+{
+    VOC_TrackData *tdata = (VOC_TrackData *) SDL_calloc(1, sizeof (*tdata));
+    if (!tdata) {
+        return false;
+    }
+
+    const VOC_AudioData *adata = (const VOC_AudioData *) audio_userdata;
+
+    tdata->adata = adata;
+    tdata->io = io;
+    SDL_copyp(&tdata->spec, spec);
+
+    *userdata = tdata;
+    return true;
+}
+
+bool SDLCALL VOC_decode(void *userdata, SDL_AudioStream *stream)
+{
+    VOC_TrackData *tdata = (VOC_TrackData *) userdata;
+
+    if (tdata->current_block >= tdata->adata->num_blocks) {
+        return false;  // EOF.
+    }
+
+    const VOC_Block *block = &tdata->adata->blocks[tdata->current_block];
+
+    if (tdata->frame_pos == 0) {  // starting a new block, see what we're doing...
+        if (block->loop_count == 0) {  // it's data.
+            if (block->iopos) {  // have to read actual file data from this block.
+                if (SDL_SeekIO(tdata->io, block->iopos, SDL_IO_SEEK_SET) != block->iopos) {
+                    return false;  // uhoh.
+                }
+            }
+            if (SDL_memcmp(&tdata->spec, &block->spec, sizeof (tdata->spec)) != 0) {
+                tdata->spec.format = SDL_AUDIO_UNKNOWN;  // we'll set it later.
+            }
+        } else if (block->loop_count == -2) {   // it's an endloop block.
+            SDL_assert(tdata->loop_start != NULL);
+            const size_t start_block = (tdata->loop_start - tdata->adata->blocks) + 1;
+            if (tdata->loop_count < 0) {   // infinite loop
+                tdata->current_block = start_block;
+            } else if (tdata->loop_count == 0) {  // last iteration
+                tdata->current_block++;
+                tdata->loop_start = NULL;
+            } else {
+                tdata->loop_count--;
+                tdata->current_block = start_block;
+            }
+            return true;  // try again on new block.
+        } else {  // it's a loop block.
+            SDL_assert(tdata->loop_start == NULL);
+            tdata->loop_start = block;
+            tdata->loop_count = block->loop_count;
+            tdata->current_block++;
+            return true;  // try again on new block.
+        }
+    }
+            
+    // still here? Feed data.
+    SDL_assert(tdata->frame_pos <= block->frames);
+    const Uint64 available = block->frames - tdata->frame_pos;
+    Uint8 buffer[512 * sizeof (Uint32)];
+    const int framesize = SDL_AUDIO_FRAMESIZE(block->spec);
+    const Uint64 frames = SDL_min(available, sizeof (buffer) / framesize);
+
+    if (frames == 0) {  // finished this block.
+        tdata->frame_pos = 0;
+        tdata->current_block++;
+        return true;  // try again, there might be more data available.
+    }
+
+    if (tdata->spec.format == SDL_AUDIO_UNKNOWN) {
+        SDL_copyp(&tdata->spec, &block->spec);
+        SDL_SetAudioStreamFormat(stream, &tdata->spec, NULL);
+    }
+
+    if (block->iopos == 0) {  // zero position means write silence (you can't have a data block at position 0 because of headers, etc).
+        const void *nullp = NULL;
+        SDL_PutAudioStreamPlanarData(stream, &nullp, 1, (int) frames);   // push silence to the stream.
+        tdata->frame_pos += frames;
     } else {
-        done = SDL_ReadIO(src, buf, v->rest);
-        if (done <= 0) {
-            return 0;
+        const size_t total = (size_t) (frames * framesize);
+        const size_t br = SDL_ReadIO(tdata->io, buffer, total);
+        const int frames_read = (int) (br / framesize);
+        if (frames_read == 0) {
+            return false;  // uhoh.
         }
-
-        v->rest = (Uint32)(v->rest - done);
-        if (v->size == ST_SIZE_WORD) {
-            done >>= 1;
-        }
-    }
-
-    return (Uint32)done;
-}
-
-static bool SDLCALL VOC_init_audio(SDL_IOStream *src, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
-{
-    if (!voc_check_header(src)) {
-        return false;
-    }
-
-    SDL_zerop(spec);
-
-    vs_t v;
-    SDL_zero(v);
-    v.rate = VOC_BAD_RATE;
-
-    if (!voc_get_block(src, &v, spec)) {
-        return false;
-    } else if (v.rate == VOC_BAD_RATE) {
-        return SDL_SetError("VOC data had no sound!");
-    } else if (v.size == 0) {
-        return SDL_SetError("VOC data had invalid word size!");
-    }
-
-    spec->format = ((v.size == ST_SIZE_WORD) ? SDL_AUDIO_S16LE : SDL_AUDIO_U8);
-    if (spec->channels == 0) {
-        spec->channels = v.channels;
-    }
-
-    size_t buflen = (size_t) v.rest;
-    Uint8 *buffer = (buflen == 0) ? NULL : (Uint8 *) SDL_malloc(buflen);
-    if (!buffer) {
-        return false;
-    }
-
-    Uint8 *fillptr = buffer;
-    while (voc_read(src, &v, fillptr, spec)) {
-        if (!voc_get_block(src, &v, spec)) {
-            SDL_free(buffer);
-            return false;
-        }
-
-        buflen += v.rest;
-
-        Uint8 *ptr = (Uint8 *) SDL_realloc(buffer, buflen);
-        if (!ptr) {
-            SDL_free(buffer);
-            return false;
-        }
-
-        buffer = ptr;
-        fillptr = ptr + (buflen - v.rest);
-    }
-
-    *audio_userdata = MIX_RAW_InitFromMemoryBuffer(buffer, buflen, spec, duration_frames, true);
-    if (!*audio_userdata) {
-        SDL_free(buffer);
-        return false;
+        SDL_PutAudioStreamData(stream, buffer, frames_read * framesize);
+        tdata->frame_pos += frames_read;
     }
 
     return true;
 }
 
-// !!! FIXME: this is the VOC decoder from SDL_mixer2, updated for SDL_mixer3. It was a "chunk" decoder, which means
-// !!! FIXME:  it predecodes all audio upfront. VOC files were small and uncomplex (and rare in modern times), so this
-// !!! FIXME:  isn't a big deal, but SDL_sound's VOC decoder can decode VOCs on the fly, so it might be worth stealing
-// !!! FIXME:  that implementation later.
+bool SDLCALL VOC_seek(void *userdata, Uint64 frame)
+{
+    VOC_TrackData *tdata = (VOC_TrackData *) userdata;
+    VOC_TrackData cpy;
+
+    SDL_copyp(&cpy, tdata);
+
+    tdata->loop_start = NULL;
+    tdata->loop_count = 0;
+    tdata->frame_pos = 0;
+    tdata->current_block = 0;
+
+    if (frame == 0) {
+        tdata->spec.format = SDL_AUDIO_UNKNOWN;  // we'll set it later.
+        return true;  // easy seek to start.
+    }
+
+    const size_t num_blocks = tdata->adata->num_blocks;
+    Uint64 framepos = 0;
+    while (tdata->current_block < num_blocks) {
+        const VOC_Block *block = &tdata->adata->blocks[tdata->current_block];
+        if (block->loop_count == 0) {  // it's data.
+            const int framesize = SDL_AUDIO_FRAMESIZE(block->spec);
+            if (frame < (framepos + block->frames)) {
+                SDL_assert(frame >= framepos);
+                tdata->frame_pos = frame - framepos;
+                if (block->iopos) {  // have to read actual file data from this block.
+                    if (SDL_SeekIO(tdata->io, block->iopos + (tdata->frame_pos * framesize), SDL_IO_SEEK_SET) < 0) {
+                        return false;  // uhoh.
+                    }
+                }
+                if (SDL_memcmp(&tdata->spec, &block->spec, sizeof (tdata->spec)) != 0) {
+                    tdata->spec.format = SDL_AUDIO_UNKNOWN;  // we'll set it later.
+                }
+                return true;  // we're ready!
+            } else {
+                framepos += block->frames;  // not there yet, keep walking through blocks.
+                tdata->current_block++;
+            }
+        } else if (block->loop_count == -2) {   // it's an endloop block.
+            SDL_assert(tdata->loop_start != NULL);
+            const size_t start_block = (tdata->loop_start - tdata->adata->blocks) + 1;
+            if (tdata->loop_count < 0) {   // infinite loop
+                tdata->current_block = start_block;
+            } else if (tdata->loop_count == 0) {  // last iteration
+                tdata->current_block++;
+                tdata->loop_start = NULL;
+            } else {
+                tdata->loop_count--;
+                tdata->current_block = start_block;
+            }
+            // try again on new block.
+        } else {  // it's a loop block.
+            SDL_assert(tdata->loop_start == NULL);
+            tdata->loop_start = block;
+            tdata->loop_count = block->loop_count;
+            tdata->current_block++;
+            // try again on new block.
+        }
+    }
+
+    // still here? Seek was past EOF.
+    return false;
+}
+
+void SDLCALL VOC_quit_track(void *userdata)
+{
+    VOC_TrackData *tdata = (VOC_TrackData *) userdata;
+    SDL_free(tdata);
+}
+
+void SDLCALL VOC_quit_audio(void *audio_userdata)
+{
+    VOC_AudioData *tdata = (VOC_AudioData *) audio_userdata;
+    SDL_free(tdata->blocks);
+    SDL_free(tdata);
+}
+
 MIX_Decoder MIX_Decoder_VOC = {
     "VOC",
     NULL, // init
     VOC_init_audio,
-    MIX_RAW_init_track,
-    MIX_RAW_decode,
-    MIX_RAW_seek,
-    MIX_RAW_quit_track,
-    MIX_RAW_quit_audio,
+    VOC_init_track,
+    VOC_decode,
+    VOC_seek,
+    VOC_quit_track,
+    VOC_quit_audio,
     NULL  // quit
 };
 
