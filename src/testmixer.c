@@ -95,8 +95,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     const SDL_AudioSpec spec = { SDL_AUDIO_S16, 2, 48000 };
 #endif
 
-    if (argc != 3) {
-        SDL_Log("USAGE: %s <file_to_play1> <file_to_play2>", argv[0]);
+    if ((argc != 2) && (argc != 3)) {
+        SDL_Log("USAGE: %s <file_to_play1> [file_to_play2]", argv[0]);
         return SDL_APP_FAILURE;
     } else if (!SDL_Init(SDL_INIT_VIDEO)) {   // it's safe to SDL_INIT_AUDIO, but MIX_Init will do it for us.
         SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
@@ -171,7 +171,6 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     SDL_Log("%s", "");
 
     track1 = MIX_CreateTrack(mixer);
-    track2 = MIX_CreateTrack(mixer);
 
     //ioraw = SDL_IOFromFile("trackraw.raw", "wb"); if (ioraw) { MIX_SetTrackRawCallback(track1, WritePCMCallback, ioraw); }
     //iocooked = SDL_IOFromFile("trackcooked.raw", "wb"); if (iocooked) { MIX_SetTrackCookedCallback(track1, WritePCMCallback, iocooked); }
@@ -180,7 +179,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 
     //const int chmap[] = { 1, 0 }; MIX_SetTrackOutputChannelMap(track1, chmap, SDL_arraysize(chmap));
     MIX_SetTrackAudio(track1, audio);
-    MIX_SetTrackIOStream(track2, SDL_IOFromFile(argv[2], "rb"), true);
+    if (argv[2]) {
+        track2 = MIX_CreateTrack(mixer);
+        MIX_SetTrackIOStream(track2, SDL_IOFromFile(argv[2], "rb"), true);
+    }
 
     SDL_PropertiesID options;
 
@@ -193,10 +195,12 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     MIX_PlayTrack(track1, options);
     SDL_DestroyProperties(options);
 
-    options = SDL_CreateProperties();
-    SDL_SetNumberProperty(options, MIX_PROP_PLAY_LOOPS_NUMBER, -1);
-    MIX_PlayTrack(track2, options);
-    SDL_DestroyProperties(options);
+    if (track2) {
+        options = SDL_CreateProperties();
+        SDL_SetNumberProperty(options, MIX_PROP_PLAY_LOOPS_NUMBER, -1);
+        MIX_PlayTrack(track2, options);
+        SDL_DestroyProperties(options);
+    }
 
     // we cheat here with PlayAudio, since the sinewave decoder produces infinite audio.
     //MIX_PlayAudio(mixer, MIX_CreateSineWaveAudio(mixer, 300, 0.25f));
