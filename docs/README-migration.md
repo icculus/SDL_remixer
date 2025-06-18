@@ -299,10 +299,10 @@ A very brief comment on what to do with each symbol in SDL2_mixer.
 - Mix_FreeMusic => MIX_DestroyAudio
 - Mix_GetNumChunkDecoders => MIX_GetNumAudioDecoders
 - Mix_GetChunkDecoder => MIX_GetAudioDecoder
-- Mix_HasChunkDecoder => FIXME roll your own: call MIX_GetAudioDecoder, up to MIX_GetNumAudioDecoders times
+- Mix_HasChunkDecoder => call MIX_GetAudioDecoder, up to MIX_GetNumAudioDecoders times
 - Mix_GetNumMusicDecoders => MIX_GetNumAudioDecoders
 - Mix_GetMusicDecoder => MIX_GetAudioDecoder
-- Mix_HasMusicDecoder => FIXME roll your own: call MIX_GetAudioDecoder, up to MIX_GetNumAudioDecoders times
+- Mix_HasMusicDecoder => call MIX_GetAudioDecoder, up to MIX_GetNumAudioDecoders times
 - Mix_MusicType => MIX_PROP_AUDIO_DECODER_STRING property with MIX_GetAudioProperties().
 - Mix_GetMusicTitle => MIX_PROP_METADATA_TITLE_STRING property with Mix_GetAudioProperties()
 - Mix_GetMusicTitleTag => MIX_PROP_METADATA_TITLE_STRING property with Mix_GetAudioProperties()
