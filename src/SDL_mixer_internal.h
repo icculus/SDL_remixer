@@ -262,6 +262,7 @@ void *MIX_SlurpConstIO(SDL_IOStream *io, size_t *datalen, bool *copied);
 
 
 // these might not all be available, but they are all declared here as if they are.
+extern MIX_Decoder MIX_Decoder_AU;
 extern MIX_Decoder MIX_Decoder_VOC;
 extern MIX_Decoder MIX_Decoder_WAV;
 extern MIX_Decoder MIX_Decoder_AIFF;

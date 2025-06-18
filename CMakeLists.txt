@@ -190,6 +190,7 @@ cmake_dependent_option(SDLMIXER_VORBIS_VORBISFILE_SHARED "Dynamically load vorbi
 option(SDLMIXER_AIFF "Enable AIFF audio" ON)
 option(SDLMIXER_WAVE "Enable WAVE audio" ON)
 option(SDLMIXER_VOC "Enable VOC audio" ON)
+option(SDLMIXER_AU "Enable AU audio" ON)
 
 set(SDLMIXER_WAVE OFF)  # !!! FIXME: .WAV support needs to be rewritten for proper streaming.
 set(SDLMIXER_AIFF OFF)  # !!! FIXME: .AIFF support needs to be rewritten for proper streaming.
@@ -242,6 +243,7 @@ add_library(${sdl3_mixer_target_name}
     src/SDL_mixer_metadata_tags.c
     src/SDL_mixer_spatialization.c
     src/decoder_aiff.c
+    src/decoder_au.c
     src/decoder_drflac.c
     src/decoder_drmp3.c
     src/decoder_flac.c
@@ -924,6 +926,13 @@ set(SDLMIXER_VOC_ENABLED FALSE)
 if(SDLMIXER_VOC)
     set(SDLMIXER_VOC_ENABLED TRUE)
     target_compile_definitions(${sdl3_mixer_target_name} PRIVATE DECODER_VOC)
+endif()
+
+list(APPEND SDLMIXER_BACKENDS AU)
+set(SDLMIXER_AU_ENABLED FALSE)
+if(SDLMIXER_AU)
+    set(SDLMIXER_AU_ENABLED TRUE)
+    target_compile_definitions(${sdl3_mixer_target_name} PRIVATE DECODER_AU)
 endif()
 
 list(APPEND SDLMIXER_BACKENDS WAVPACK)

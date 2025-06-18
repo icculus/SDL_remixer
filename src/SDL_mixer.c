@@ -29,6 +29,9 @@ static const MIX_Decoder *decoders[] = {
     #ifdef DECODER_VOC
     &MIX_Decoder_VOC,
     #endif
+    #ifdef DECODER_AU
+    &MIX_Decoder_AU,
+    #endif
     #ifdef DECODER_WAV
     &MIX_Decoder_WAV,
     #endif
