@@ -266,6 +266,10 @@ more convenient.
 
 A very brief comment on what to do with each symbol in SDL2_mixer.
 
+Some of these are listed as "no equivalent in SDL3_mixer" but could possibly
+be added if there is a need. If you're stuck, please file an issue and we
+can discuss it!
+
 - SDL_MIXER_MAJOR_VERSION => MIX_MAJOR_VERSION
 - SDL_MIXER_MINOR_VERSION => MIX_MINOR_VERSION
 - SDL_MIXER_MICRO_VERSION => MIX_MICRO_VERSION
