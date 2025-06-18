@@ -116,7 +116,7 @@ static int OPUS_IoSeek(void *datasource, opus_int64 offset, int whence)
 
 static opus_int64 OPUS_IoTell(void *datasource)
 {
-    return (opus_int64) SDL_TellIO((SDL_IOStream*)datasource);
+    return SDL_TellIO((SDL_IOStream*)datasource);
 }
 
 static int OPUS_IoClose(void *datasource)
@@ -244,7 +244,7 @@ bool SDLCALL OPUS_seek(void *track_userdata, Uint64 frame)
 {
     OPUS_TrackData *tdata = (OPUS_TrackData *) track_userdata;
     // !!! FIXME: I assume op_raw_seek is faster if we're seeking to start, but I could be wrong.
-    const int rc = (frame == 0) ? opus.op_raw_seek(tdata->of, 0) : opus.op_pcm_seek(tdata->of, (ogg_int64_t) frame);
+    const int rc = (frame == 0) ? opus.op_raw_seek(tdata->of, 0) : opus.op_pcm_seek(tdata->of, (Sint64) frame);
     return (rc == 0) ? true : set_op_error("op_pcm_seek", rc);
 }
 
