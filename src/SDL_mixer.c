@@ -26,17 +26,8 @@
 // !!! FIXME: should RAW go first (only needs to check if it was explicitly
 // !!! FIXME: requested), and SINEWAVE last (must be requested, likely rare).
 static const MIX_Decoder *decoders[] = {
-    #ifdef DECODER_VOC
-    &MIX_Decoder_VOC,
-    #endif
-    #ifdef DECODER_AU
-    &MIX_Decoder_AU,
-    #endif
     #ifdef DECODER_WAV
     &MIX_Decoder_WAV,
-    #endif
-    #ifdef DECODER_AIFF
-    &MIX_Decoder_AIFF,
     #endif
     #ifdef DECODER_OGGVORBIS_VORBISFILE
     &MIX_Decoder_VORBIS,
@@ -67,6 +58,15 @@ static const MIX_Decoder *decoders[] = {
     #endif
     #ifdef DECODER_MOD_XMP
     &MIX_Decoder_XMP,
+    #endif
+    #ifdef DECODER_VOC
+    &MIX_Decoder_VOC,
+    #endif
+    #ifdef DECODER_AIFF
+    &MIX_Decoder_AIFF,
+    #endif
+    #ifdef DECODER_AU
+    &MIX_Decoder_AU,
     #endif
     #ifdef DECODER_MP3_MPG123
     &MIX_Decoder_MPG123,
