@@ -60,9 +60,7 @@ typedef struct DRMP3_TrackData
 } DRMP3_TrackData;
 
 
-// the i/o callbacks are only used for initial open, so it can read as little
-//  as possible to verify it's really an MP3 file. After we're sure it is, we
-//  pull the whole thing into RAM.
+// drmp3 -> SDL_IOStream bridge...
 
 static size_t DRMP3_IoRead(void *context, void *buf, size_t size)
 {
@@ -80,6 +78,7 @@ static drmp3_bool32 DRMP3_IoTell(void *context, drmp3_int64 *pos)
     *pos = (drmp3_int64) SDL_TellIO((SDL_IOStream *) context);
     return (*pos < 0) ? DRMP3_FALSE : DRMP3_TRUE;
 }
+
 
 static bool SDLCALL DRMP3_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props, Sint64 *duration_frames, void **audio_userdata)
 {
