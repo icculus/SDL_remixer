@@ -285,7 +285,7 @@ A very brief comment on what to do with each symbol in SDL2_mixer.
 - Mix_MusicType => MIX_PROP_AUDIO_DECODER_STRING property with MIX_GetAudioProperties().
 - Mix_Music => MIX_Audio
 - Mix_OpenAudio => MIX_CreateMixerDevice
-- Mix_PauseAudio => FIXME currently unsupported
+- Mix_PauseAudio => MIX_PauseAllTracks
 - Mix_QuerySpec => MIX_GetMixerFormat
 - Mix_AllocateChannels => MIX_CreateTrack
 - Mix_LoadWAV_IO => MIX_LoadAudio_IO
