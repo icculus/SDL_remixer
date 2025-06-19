@@ -315,7 +315,7 @@ static void SDL_TARGETING("sse") calculate_distance_attenuation_and_angle_sse(co
 #endif
 
 #if defined(SDL_NEON_INTRINSICS)
-static float32x4_t SDL_TARGETING("neon") xyzzy_neon(const float32x4_t a, const float32x4_t b)
+static float32x4_t xyzzy_neon(const float32x4_t a, const float32x4_t b)
 {
     const float32x4_t shuf_a = { a[1], a[2], a[0], a[3] };
     const float32x4_t shuf_b = { b[1], b[2], b[0], b[3] };
@@ -325,7 +325,7 @@ static float32x4_t SDL_TARGETING("neon") xyzzy_neon(const float32x4_t a, const f
     return retval;
 }
 
-static float SDL_TARGETING("neon") dotproduct_neon(const float32x4_t a, const float32x4_t b)
+static float dotproduct_neon(const float32x4_t a, const float32x4_t b)
 {
     const float32x4_t prod = vmulq_f32(a, b);
     const float32x4_t sum1 = vaddq_f32(prod, vrev64q_f32(prod));
@@ -333,12 +333,12 @@ static float SDL_TARGETING("neon") dotproduct_neon(const float32x4_t a, const fl
     return sum2[3];
 }
 
-static float SDL_TARGETING("neon") magnitude_neon(const float32x4_t v)
+static float magnitude_neon(const float32x4_t v)
 {
     return SDL_sqrtf(dotproduct_neon(v, v));
 }
 
-static void SDL_TARGETING("neon") calculate_distance_attenuation_and_angle_neon(const float *position, float *_gain, float *_radians)
+static void calculate_distance_attenuation_and_angle_neon(const float *position, float *_gain, float *_radians)
 {
     const float32x4_t position_neon = vld1q_f32(position);
     const float32x4_t at_neon = vld1q_f32(listener_at);
