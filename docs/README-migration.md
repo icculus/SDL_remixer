@@ -75,6 +75,13 @@ if (!MIX_Init()) {
 }
 ```
 
+MIX_Init() is reference-counted; it's safe to call it more than once, and
+only the first call will do actual initialization tasks. Likewise, actual
+deinitialization with MIX_Quit() will only happen when it has been called
+as many times as MIX_Init() has. This allows different parts of the program
+to initialize and use SDL3_mixer without knowing about other parts using it
+too.
+
 Previously the (singleton) mixer was opened with Mix_OpenAudio(), now one
 calls MIX_CreateMixerDevice(). You can open multiple mixers now, in case
 different parts of a program want to operate independently, or you need to
@@ -236,8 +243,12 @@ Mix_MasterVolume() is replaced by MIX_SetMasterGain(). Same idea.
 ## Halting
 
 Mix_HaltChannel(), MIX_HaltMusic(), Mix_FadeOutChannel() and Mix_FadeOutMusic()
-are replaced by MIX_StopTrack(). Be careful that fade-outs work in sample frames,
-not milliseconds, in SDL3_mixer. Use MIX_TrackMSToFrames() to convert.
+are replaced by MIX_StopTrack(). Be careful here: fade-outs work in sample
+frames of the track's input, not milliseconds, in SDL3_mixer. Use
+MIX_TrackMSToFrames() to convert. However, If stopping multiple tracks at once
+with MIX_StopAllTracks() or MIX_StopTag(), the fade out is specified in
+_milliseconds_, since we can't guarantee that all tracks have the same sample
+rate.
 
 
 ## Pausing
