@@ -426,7 +426,7 @@ extern SDL_DECLSPEC MIX_Mixer * SDLCALL MIX_CreateMixerDevice(SDL_AudioDeviceID 
  *
  * \since This function is available since SDL_mixer 3.0.0.
  *
- * \sa MIX_CreateMixer
+ * \sa MIX_CreateMixerDevice
  * \sa MIX_DestroyMixer
  */
 extern SDL_DECLSPEC MIX_Mixer * SDLCALL MIX_CreateMixer(const SDL_AudioSpec *spec);
