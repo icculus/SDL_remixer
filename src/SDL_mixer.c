@@ -659,14 +659,12 @@ bool MIX_Init(void)
     if (!mixer_initialized) {
         #if defined(SDL_SSE_INTRINSICS)   // we assume you have SSE if you're on an Intel CPU.
         if (!SDL_HasSSE()) {
-            SDL_QuitSubSystem(SDL_INIT_AUDIO);
             return SDL_SetError("Need SSE instructions but this CPU doesn't offer it");  // whoa! Better order a new Pentium III from Gateway 2000!
         }
         #endif
 
         #if defined(SDL_NEON_INTRINSICS) && !NEED_SCALAR_FALLBACK
         if (!SDL_HasNEON()) {
-            SDL_QuitSubSystem(SDL_INIT_AUDIO);
             return SDL_SetError("Need NEON instructions but this CPU doesn't offer it");  // :(
         }
         #elif defined(SDL_NEON_INTRINSICS) && NEED_SCALAR_FALLBACK
@@ -675,7 +673,7 @@ bool MIX_Init(void)
 
         global_lock = SDL_CreateMutex();
         if (!global_lock) {
-            SDL_QuitSubSystem(SDL_INIT_AUDIO);
+            return false;
         }
         InitDecoders();
     }
