@@ -236,7 +236,7 @@ typedef struct MIX_Group MIX_Group;
  * This function returns the current version, while MIX_VERSION is the version
  * you compiled with.
  *
- * This function may be called safely at any time, even before SDL_Init().
+ * This function may be called safely at any time, even before MIX_Init().
  *
  * \returns the version of the linked library.
  *
@@ -255,8 +255,6 @@ extern SDL_DECLSPEC int SDLCALL MIX_GetVersion(void);
  * It is safe to call this multiple times; the library will only initialize
  * once, and won't deinitialize until MIX_Quit() has been called a matching
  * number of times. Extra attempts to init report success.
- *
- * This will call SDL_Init(SDL_INIT_AUDIO) internally.
  *
  * \returns true on success, false on error; call SDL_GetError() for details.
  *
@@ -295,8 +293,6 @@ extern SDL_DECLSPEC bool SDLCALL MIX_Init(void);
  * Don't attempt to destroy objects after this call. The app is still
  * encouraged to manage their resources carefully and clean up first, treating
  * this function as a safety net against memory leaks.
- *
- * This will call SDL_QuitSubSystem(SDL_INIT_AUDIO) internally.
  *
  * \threadsafety It is safe to call this function from any thread.
  *
@@ -372,6 +368,10 @@ extern SDL_DECLSPEC const char * SDLCALL MIX_GetAudioDecoder(int index);
  * Only playback devices make sense here. Attempting to open a recording
  * device will fail.
  *
+ * This will call SDL_Init(SDL_INIT_AUDIO) internally; it's safe to call
+ * SDL_Init() before this call, too, if you intend to enumerate audio devices
+ * to choose one to open here.
+ *
  * An audio format can be requested, and the system will try to set the
  * hardware to those specifications, or as close as possible, but this is just
  * a hint. SDL_mixer will handle all data conversion behind the scenes in any
@@ -435,7 +435,7 @@ extern SDL_DECLSPEC MIX_Mixer * SDLCALL MIX_CreateMixer(const SDL_AudioSpec *spe
  * Free a mixer.
  *
  * If this mixer was created with MIX_CreateMixerDevice(), this function will
- * also close the audio device.
+ * also close the audio device and call SDL_QuitSubSystem(SDL_INIT_AUDIO).
  *
  * Any MIX_Group or MIX_Track created for this mixer will also be destroyed.
  * Do not access them again or attempt to destroy them after the device is

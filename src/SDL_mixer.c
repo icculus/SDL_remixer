@@ -657,10 +657,6 @@ int MIX_GetVersion(void)
 bool MIX_Init(void)
 {
     if (!mixer_initialized) {
-        if (!SDL_Init(SDL_INIT_AUDIO)) {
-            return false;
-        }
-
         #if defined(SDL_SSE_INTRINSICS)   // we assume you have SSE if you're on an Intel CPU.
         if (!SDL_HasSSE()) {
             SDL_QuitSubSystem(SDL_INIT_AUDIO);
@@ -717,8 +713,6 @@ void MIX_Quit(void)
 
     SDL_DestroyMutex(global_lock);
     global_lock = NULL;
-
-    SDL_QuitSubSystem(SDL_INIT_AUDIO);
 
     mixer_initialized = 0;
 }
@@ -817,10 +811,14 @@ MIX_Mixer *MIX_CreateMixerDevice(SDL_AudioDeviceID devid, const SDL_AudioSpec *s
 {
     if (!CheckInitialized()) {
         return NULL;
+    } else if (!SDL_Init(SDL_INIT_AUDIO)) {
+        return NULL;
     }
 
     MIX_Mixer *mixer = CreateMixer(SDL_OpenAudioDeviceStream(devid, spec, NULL, NULL));
-    if (mixer) {
+    if (!mixer) {
+        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    } else {
         mixer->device_id = SDL_GetAudioStreamDevice(mixer->output_stream);
         SDL_AddEventWatch(AudioDeviceChangeEventWatcher, mixer);
         SDL_ResumeAudioStreamDevice(mixer->output_stream);
@@ -864,6 +862,11 @@ void MIX_DestroyMixer(MIX_Mixer *mixer)
     SDL_DestroyProperties(mixer->track_tags);
     SDL_DestroyProperties(mixer->props);
     SDL_free(mixer->mix_buffer);
+
+    if (mixer->device_id) {
+        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    }
+
     SDL_free(mixer);
 }
 
