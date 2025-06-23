@@ -816,7 +816,7 @@ MIX_Mixer *MIX_CreateMixer(const SDL_AudioSpec *spec)
     // we want this stream to survive SDL_Quit(), since it's not attached to an audio device.
     SDL_SetBooleanProperty(SDL_GetAudioStreamProperties(stream), SDL_PROP_AUDIOSTREAM_AUTO_CLEANUP_BOOLEAN, false);
 
-    return CreateMixer(SDL_CreateAudioStream(spec, spec));
+    return CreateMixer(stream);
 }
 
 MIX_Mixer *MIX_CreateMixerDevice(SDL_AudioDeviceID devid, const SDL_AudioSpec *spec)
