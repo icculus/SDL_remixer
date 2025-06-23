@@ -23,6 +23,11 @@
 
 #include "SDL_mixer_internal.h"
 
+// !!! FIXME: remove this once SDL 3.4.0 ships.
+#ifndef SDL_PROP_AUDIOSTREAM_AUTO_CLEANUP_BOOLEAN
+#define SDL_PROP_AUDIOSTREAM_AUTO_CLEANUP_BOOLEAN "SDL.audiostream.auto_cleanup"
+#endif
+
 // !!! FIXME: should RAW go first (only needs to check if it was explicitly
 // !!! FIXME: requested), and SINEWAVE last (must be requested, likely rare).
 static const MIX_Decoder *decoders[] = {
@@ -802,6 +807,15 @@ MIX_Mixer *MIX_CreateMixer(const SDL_AudioSpec *spec)
         SDL_InvalidParamError("spec");
         return NULL;
     }
+
+    SDL_AudioStream *stream = SDL_CreateAudioStream(spec, spec);
+    if (!stream) {
+        return NULL;
+    }
+
+    // we want this stream to survive SDL_Quit(), since it's not attached to an audio device.
+    SDL_SetBooleanProperty(SDL_GetAudioStreamProperties(stream), SDL_PROP_AUDIOSTREAM_AUTO_CLEANUP_BOOLEAN, false);
+
     return CreateMixer(SDL_CreateAudioStream(spec, spec));
 }
 
@@ -1341,6 +1355,9 @@ MIX_Track *MIX_CreateTrack(MIX_Mixer *mixer)
         return NULL;
     }
 
+    // we want this stream to survive SDL_Quit(), since it's not attached to an audio device.
+    SDL_SetBooleanProperty(SDL_GetAudioStreamProperties(track->output_stream), SDL_PROP_AUDIOSTREAM_AUTO_CLEANUP_BOOLEAN, false);
+
     SDL_SetAudioStreamGetCallback(track->output_stream, TrackGetCallback, track);
 
     track->mixer = mixer;
@@ -1469,6 +1486,9 @@ static bool MIX_SetTrackAudio_internal(MIX_Track *track, MIX_Audio *audio, SDL_I
             }
             return false;
         }
+
+        // we want this stream to survive SDL_Quit(), since it's not attached to an audio device.
+        SDL_SetBooleanProperty(SDL_GetAudioStreamProperties(track->internal_stream), SDL_PROP_AUDIOSTREAM_AUTO_CLEANUP_BOOLEAN, false);
     }
 
     if (track->input_audio) {
@@ -2725,6 +2745,9 @@ MIX_AudioDecoder * MIX_CreateAudioDecoder_IO(SDL_IOStream *io, bool closeio, SDL
         SDL_free(audiodecoder);
         return NULL;
     }
+
+    // we want this stream to survive SDL_Quit(), since it's not attached to an audio device.
+    SDL_SetBooleanProperty(SDL_GetAudioStreamProperties(audiodecoder->stream), SDL_PROP_AUDIOSTREAM_AUTO_CLEANUP_BOOLEAN, false);
 
     LockGlobal();
     audiodecoder->next = all_audiodecoders;
