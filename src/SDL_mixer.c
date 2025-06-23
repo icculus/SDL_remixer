@@ -1001,6 +1001,8 @@ MIX_Audio *MIX_LoadAudioWithProperties(SDL_PropertiesID props)  // lets you spec
         goto failed;
     }
 
+    io = origio;  // we'll replace this if parsing metadata tags.
+
     // check for ID3/APE/MusicMatch/whatever tags here, in case they were slapped onto the edge of any random file format.
     audio->clamp_offset = -1;
     audio->clamp_length = -1;
