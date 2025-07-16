@@ -260,6 +260,9 @@ void *MIX_GetConstIOBuffer(SDL_IOStream *io, size_t *datalen);
 // Slurp in all the data from an SDL_IOStream; if it appears to be memory-based, return the pointer with no allocation or copy made.
 void *MIX_SlurpConstIO(SDL_IOStream *io, size_t *datalen, bool *copied);
 
+// mu-Law and a-Law lookup tables.
+extern const float MIX_alawToFloat[256];
+extern const float MIX_ulawToFloat[256];
 
 // these might not all be available, but they are all declared here as if they are.
 extern MIX_Decoder MIX_Decoder_AU;

@@ -192,7 +192,6 @@ option(SDLMIXER_WAVE "Enable WAVE audio" ON)
 option(SDLMIXER_VOC "Enable VOC audio" ON)
 option(SDLMIXER_AU "Enable AU audio" ON)
 
-set(SDLMIXER_WAVE OFF)  # !!! FIXME: .WAV support needs to be rewritten for proper streaming.
 set(SDLMIXER_AIFF OFF)  # !!! FIXME: .AIFF support needs to be rewritten for proper streaming.
 
 option(SDLMIXER_WAVPACK "Enable WavPack audio" ON)

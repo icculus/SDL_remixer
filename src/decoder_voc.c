@@ -22,6 +22,7 @@
 #ifdef DECODER_VOC
 
 // https://moddingwiki.shikadi.net/wiki/VOC_Format
+// https://www.manualslib.com/manual/547219/Creative-Sb0350.html?page=125#manual
 
 #include "SDL_mixer_internal.h"
 
