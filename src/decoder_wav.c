@@ -28,6 +28,9 @@
 // SDL's SDL_wave.c at some point. It's been heavily modified for this.
 
 
+// !!! FIXME: some of this is duplicated in decoder_aiff.c; if we end up
+// !!! FIXME: supporting more formats that need it, we should generalize it.
+
 
 /*
     Taken with permission from SDL_wave.h, part of the SDL library,
@@ -178,11 +181,11 @@ typedef int (*WAV_FetchFn)(WAV_TrackData *tdata, Uint8 *buffer, int buflen);
 typedef struct WAV_AudioData
 {
     ADPCM_DecoderInfo adpcm_info;
-    SDL_AudioSpec spec;
     Uint16 encoding;
     Sint64 start;
     Sint64 stop;
-    int samplesize;
+    int framesize;
+    int decoded_framesize;
     WAV_FetchFn fetch;
     Sint64 num_pcm_frames;
     unsigned int numloops;
@@ -195,8 +198,6 @@ struct WAV_TrackData
     SDL_IOStream *io;
     ADPCM_DecoderState adpcm_state;
 };
-
-
 
 
 static bool MS_ADPCM_Init(ADPCM_DecoderInfo *info, const Uint8 *chunk_data, Uint32 chunk_length)
@@ -715,22 +716,13 @@ static int FetchIMAADPCM(WAV_TrackData *tdata, Uint8 *buffer, int buflen)
 static int FetchXLaw(WAV_TrackData *tdata, Uint8 *buffer, int buflen, const float *lut)
 {
     int length = buflen;
-    int i = 0, o = 0;
     length = (int) SDL_ReadIO(tdata->io, buffer, (size_t)(length / 4));
-    if (length % tdata->adata->samplesize != 0) {
-        length -= length % tdata->adata->samplesize;
+    if (length % tdata->adata->framesize != 0) {
+        length -= length % tdata->adata->framesize;
     }
-    for (i = length - 1, o = (length - 1) * 4; i >= 0; i--, o -= 4) {
-        union
-        {
-            float f;
-            Uint32 ui32;
-        } sample;
-        sample.f = lut[buffer[i]];
-        buffer[o + 0] = (sample.ui32 >> 0) & 0xFF;
-        buffer[o + 1] = (sample.ui32 >> 8) & 0xFF;
-        buffer[o + 2] = (sample.ui32 >> 16) & 0xFF;
-        buffer[o + 3] = (sample.ui32 >> 24) & 0xFF;
+    float *out = (float *) &buffer[(length - 1) * 4];
+    for (int i = length - 1; i >= 0; i--) {
+        out[i] = lut[buffer[i]];
     }
     return length * 4;
 }
@@ -750,33 +742,23 @@ static int FetchPCM(WAV_TrackData *tdata, Uint8 *buffer, int buflen)
     return SDL_ReadIO(tdata->io, buffer, buflen);
 }
 
-static Uint32 S24toS32LE(const Uint8 *x) {
-    const Uint32 bits = 24;
-    const Uint32 in = (((Uint32)x[2] << 0)  & 0x0000FF) |
-                      (((Uint32)x[1] << 8)  & 0x00FF00) |
-                      (((Uint32)x[0] << 16) & 0xFF0000);
-    const Uint32 m = 1u << (bits - 1);
-    return (in ^ m) - m;
-}
-
 static int FetchPCM24LE(WAV_TrackData *tdata, Uint8 *buffer, int buflen)
 {
     int length = buflen;
-    int i = 0, o = 0;
     length = (int) SDL_ReadIO(tdata->io, buffer, (size_t)((length / 4) * 3));
-    if ((length % tdata->adata->samplesize) != 0) {
-        length -= length % tdata->adata->samplesize;
+    if ((length % tdata->adata->framesize) != 0) {
+        length -= length % tdata->adata->framesize;
     }
+    int i = 0, o = 0;
     for (i = length - 3, o = ((length - 3) / 3) * 4; i >= 0; i -= 3, o -= 4) {
-        const Uint32 decoded = S24toS32LE(buffer + i);
-        buffer[o + 3] = (decoded >> 0) & 0xFF;
-        buffer[o + 2] = (decoded >> 8) & 0xFF;
-        buffer[o + 1] = (decoded >> 16) & 0xFF;
-        buffer[o + 0] = (decoded >> 24) & 0xFF;
+        const Uint8 *x = &buffer[i];
+        const Sint32 in = ((Sint32)(Sint8)x[2] << 16) | ((int32_t)x[1] << 8) | x[0];
+        float *out = (float *) &buffer[o];
+        *out = ((float) in) / 8388608.0f;
     }
-
     return (length / 3) * 4;
 }
+
 
 #if SDL_BYTEORDER == SDL_LIL_ENDIAN
 #define MIX_SwapDoubleLE(X)  (X)
@@ -797,28 +779,20 @@ static double MIX_SwapDoubleLE(double x)
 static int FetchFloat64LE(WAV_TrackData *tdata, Uint8 *buffer, int buflen)
 {
     int length = buflen;
-    int i = 0, o = 0;
     length = (int) SDL_ReadIO(tdata->io, buffer, (size_t)length);
-    if (length % tdata->adata->samplesize != 0) {
-        length -= length % tdata->adata->samplesize;
+    if (length % tdata->adata->framesize != 0) {
+        length -= length % tdata->adata->framesize;
     }
-    for (i = 0, o = 0; i < length; i += 8, o += 4) {
-        union
-        {
-            float f;
-            Uint32 ui32;
-        } sample;
-        sample.f = (float)MIX_SwapDoubleLE(*(double*)(buffer + i));
-        buffer[o + 0] = (sample.ui32 >> 0) & 0xFF;
-        buffer[o + 1] = (sample.ui32 >> 8) & 0xFF;
-        buffer[o + 2] = (sample.ui32 >> 16) & 0xFF;
-        buffer[o + 3] = (sample.ui32 >> 24) & 0xFF;
+    float *out = (float *) buffer;
+    int i, o;
+    for (i = 0, o = 0; i < length; i += 8, o++) {
+        out[o] = (float)MIX_SwapDoubleLE(*(double*)(buffer + i));
     }
-
     return length / 2;
 }
 
-static bool ParseFMT(WAV_AudioData *adata, SDL_IOStream *io, Uint32 chunk_length)
+
+static bool ParseFMT(WAV_AudioData *adata, SDL_IOStream *io, SDL_AudioSpec *spec, Uint32 chunk_length)
 {
     WaveFMTEx fmt;
 
@@ -886,28 +860,28 @@ static bool ParseFMT(WAV_AudioData *adata, SDL_IOStream *io, Uint32 chunk_length
 
     SDL_free(chunk);
 
-    adata->spec.freq = (int)SDL_Swap32LE(fmt.format.frequency);
+    spec->freq = (int)SDL_Swap32LE(fmt.format.frequency);
     const int bits = (int)SDL_Swap16LE(fmt.format.bitspersample);
     bool unknown_bits = false;
     switch (bits) {
         case 4:
             switch(adata->encoding) {
-            case MS_ADPCM_CODE: adata->spec.format = SDL_AUDIO_S16; break;
-            case IMA_ADPCM_CODE: adata->spec.format = SDL_AUDIO_S16; break;
+            case MS_ADPCM_CODE: spec->format = SDL_AUDIO_S16; break;
+            case IMA_ADPCM_CODE: spec->format = SDL_AUDIO_S16; break;
             default: unknown_bits = true; break;
             }
             break;
         case 8:
             switch(adata->encoding) {
-            case PCM_CODE:  adata->spec.format = SDL_AUDIO_U8; break;
-            case ALAW_CODE: adata->spec.format = SDL_AUDIO_F32; break;
-            case MULAW_CODE: adata->spec.format = SDL_AUDIO_F32; break;
+            case PCM_CODE:  spec->format = SDL_AUDIO_U8; break;
+            case ALAW_CODE: spec->format = SDL_AUDIO_F32; break;
+            case MULAW_CODE: spec->format = SDL_AUDIO_F32; break;
             default: unknown_bits = true; break;
             }
             break;
         case 16:
             switch(adata->encoding) {
-            case PCM_CODE: adata->spec.format = SDL_AUDIO_S16; break;
+            case PCM_CODE: spec->format = SDL_AUDIO_S16; break;
             default: unknown_bits = true; break;
             }
             break;
@@ -915,15 +889,15 @@ static bool ParseFMT(WAV_AudioData *adata, SDL_IOStream *io, Uint32 chunk_length
             switch(adata->encoding) {
             case PCM_CODE:
                 adata->fetch = FetchPCM24LE;
-                adata->spec.format = SDL_AUDIO_S32;
+                spec->format = SDL_AUDIO_F32;
                 break;
             default: unknown_bits = true; break;
             }
             break;
         case 32:
             switch(adata->encoding) {
-            case PCM_CODE:   adata->spec.format = SDL_AUDIO_S32; break;
-            case IEEE_FLOAT_CODE: adata->spec.format = SDL_AUDIO_F32; break;
+            case PCM_CODE:   spec->format = SDL_AUDIO_S32; break;
+            case IEEE_FLOAT_CODE: spec->format = SDL_AUDIO_F32; break;
             default: unknown_bits = true; break;
             }
             break;
@@ -931,7 +905,7 @@ static bool ParseFMT(WAV_AudioData *adata, SDL_IOStream *io, Uint32 chunk_length
             switch(adata->encoding) {
             case IEEE_FLOAT_CODE:
                 adata->fetch = FetchFloat64LE;
-                adata->spec.format = SDL_AUDIO_F32;
+                spec->format = SDL_AUDIO_F32;
                 break;
             default: unknown_bits = true; break;
             }
@@ -943,8 +917,9 @@ static bool ParseFMT(WAV_AudioData *adata, SDL_IOStream *io, Uint32 chunk_length
         return SDL_SetError("WAV: Unknown PCM format with %d bits", bits);
     }
 
-    adata->spec.channels = (Uint8) SDL_Swap16LE(fmt.format.channels);
-    adata->samplesize = adata->spec.channels * (bits / 8);
+    spec->channels = (Uint8) SDL_Swap16LE(fmt.format.channels);
+    adata->framesize = spec->channels * (bits / 8);
+    adata->decoded_framesize = SDL_AUDIO_FRAMESIZE(*spec);
 
     return true;
 }
@@ -1006,7 +981,7 @@ static bool ParseSMPL(WAV_AudioData *adata, SDL_IOStream *io, Uint32 chunk_lengt
     return loaded;
 }
 
-static bool CheckMetadataField(const char *wantedtag, const char *propname, SDL_PropertiesID props, size_t *i, Uint32 chunk_length, Uint8 *data)
+static bool CheckWAVMetadataField(const char *wantedtag, const char *propname, SDL_PropertiesID props, size_t *i, Uint32 chunk_length, Uint8 *data)
 {
     SDL_assert(SDL_strlen(wantedtag) == 4);
 
@@ -1057,13 +1032,13 @@ static bool ParseLIST(WAV_AudioData *adata, SDL_IOStream *io, SDL_PropertiesID p
 
     if (SDL_strncmp((const char *)data, "INFO", 4) == 0) {
         for (size_t i = 4; i < chunk_length - 4;) {
-            if (CheckMetadataField("INAM", MIX_PROP_METADATA_TITLE_STRING, props, &i, chunk_length, data)) {
+            if (CheckWAVMetadataField("INAM", MIX_PROP_METADATA_TITLE_STRING, props, &i, chunk_length, data)) {
                 continue;
-            } else if (CheckMetadataField("IART", MIX_PROP_METADATA_ARTIST_STRING, props, &i, chunk_length, data)) {
+            } else if (CheckWAVMetadataField("IART", MIX_PROP_METADATA_ARTIST_STRING, props, &i, chunk_length, data)) {
                 continue;
-            } else if (CheckMetadataField("IALB", MIX_PROP_METADATA_ALBUM_STRING, props, &i, chunk_length, data)) {
+            } else if (CheckWAVMetadataField("IALB", MIX_PROP_METADATA_ALBUM_STRING, props, &i, chunk_length, data)) {
                 continue;
-            } else if (CheckMetadataField("BCPR", MIX_PROP_METADATA_COPYRIGHT_STRING, props, &i, chunk_length, data)) {
+            } else if (CheckWAVMetadataField("BCPR", MIX_PROP_METADATA_COPYRIGHT_STRING, props, &i, chunk_length, data)) {
                 continue;
             }
             i++;
@@ -1075,7 +1050,7 @@ static bool ParseLIST(WAV_AudioData *adata, SDL_IOStream *io, SDL_PropertiesID p
     return true;
 }
 
-static bool ParseID3(WAV_AudioData *adata, SDL_IOStream *io, SDL_PropertiesID props, Uint32 chunk_length)
+static bool ParseWAVID3(SDL_IOStream *io, SDL_PropertiesID props, Uint32 chunk_length)
 {
     MIX_IoClamp clamp;
     SDL_IOStream *ioclamp = MIX_OpenIoClamp(&clamp, io);
@@ -1088,7 +1063,7 @@ static bool ParseID3(WAV_AudioData *adata, SDL_IOStream *io, SDL_PropertiesID pr
     return true;
 }
 
-static bool WAV_init_audio_internal(WAV_AudioData *adata, SDL_IOStream *io, SDL_PropertiesID props)
+static bool WAV_init_audio_internal(WAV_AudioData *adata, SDL_IOStream *io, SDL_AudioSpec *spec, SDL_PropertiesID props)
 {
     const Sint64 flen = SDL_GetIOSize(io);
     bool found_FMT = false;
@@ -1138,7 +1113,7 @@ static bool WAV_init_audio_internal(WAV_AudioData *adata, SDL_IOStream *io, SDL_
         switch (chunk_type) {
         case FMT:
             found_FMT = true;
-            chunk_okay = ParseFMT(adata, io, chunk_length);
+            chunk_okay = ParseFMT(adata, io, spec, chunk_length);
             break;
         case DATA:
             found_DATA = true;
@@ -1152,7 +1127,7 @@ static bool WAV_init_audio_internal(WAV_AudioData *adata, SDL_IOStream *io, SDL_
             break;
         case ID3x:
         case ID3X:
-            chunk_okay = ParseID3(adata, io, props, chunk_length);
+            chunk_okay = ParseWAVID3(io, props, chunk_length);
             break;
         default:
             // unknown or unsupported chunk, we'll just skip it.
@@ -1202,13 +1177,11 @@ static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
     }
 
     adata->num_pcm_frames = MIX_DURATION_UNKNOWN;  // !!! FIXME: WAV_init_audio_internal needs to set this.
-    const bool rc = WAV_init_audio_internal(adata, io, props);
+    const bool rc = WAV_init_audio_internal(adata, io, spec, props);
     if (!rc) {
         WAV_quit_audio(adata);
         return false;
     }
-
-    SDL_copyp(spec, &adata->spec);
 
     *duration_frames = adata->num_pcm_frames;
     *audio_userdata = adata;
@@ -1268,9 +1241,8 @@ static bool SDLCALL WAV_decode(void *track_userdata, SDL_AudioStream *stream)
 
     // !!! FIXME: looping.
     Uint8 buffer[1024];
-    const int framesize = (int) SDL_AUDIO_FRAMESIZE(tdata->adata->spec);
     int buflen = (int) sizeof (buffer);
-    const int mod = buflen % framesize;
+    const int mod = buflen % tdata->adata->decoded_framesize;
     if (mod) {
         buflen -= mod;
     }
@@ -1297,7 +1269,7 @@ static bool SDLCALL WAV_seek(void *track_userdata, Uint64 frame)
             return false;
         }
 
-        int remainder = ((int)(frame % adata->adpcm_info.samplesperblock)) * SDL_AUDIO_FRAMESIZE(adata->spec);
+        int remainder = ((int)(frame % adata->adpcm_info.samplesperblock)) * adata->decoded_framesize;
         while (remainder > 0) {
             Uint8 buffer[1024];
             const int br = adata->fetch(tdata, buffer, SDL_min(remainder, sizeof (buffer)));
@@ -1307,7 +1279,7 @@ static bool SDLCALL WAV_seek(void *track_userdata, Uint64 frame)
             remainder -= br;
         }
     } else {
-        const Sint64 dest_offset = (Sint64)frame * SDL_AUDIO_FRAMESIZE(adata->spec);
+        const Sint64 dest_offset = (Sint64)frame * adata->framesize;
         const Sint64 destpos = adata->start + dest_offset;
         if (destpos > adata->stop) {
             return false;
