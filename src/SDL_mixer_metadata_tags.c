@@ -406,7 +406,8 @@ static size_t id3v2x_parse_frame(SDL_PropertiesID props, SDL_IOStream *io, Uint8
     }
     SDL_SeekIO(io, frame_begin + (Sint64)size + ID3v2_3_FRAME_HEADER_SIZE, SDL_IO_SEEK_SET);
 
-    handle_id3v2_string(props, key, buffer, size);
+    buffer[read_size] = '\0';  // make sure it's definitely null-terminated.
+    handle_id3v2_string(props, key, buffer, read_size);
 
     return (size_t)(size + ID3v2_3_FRAME_HEADER_SIZE); // data size + size of the header
 }
@@ -414,7 +415,7 @@ static size_t id3v2x_parse_frame(SDL_PropertiesID props, SDL_IOStream *io, Uint8
 // Parse content of ID3v2. This expects the stream to be seeked to the start of the potential header.
 static bool parse_id3v2(SDL_PropertiesID props, SDL_IOStream *io)
 {
-    Uint8 buffer[ID3v2_BUFFER_SIZE];
+    Uint8 buffer[ID3v2_BUFFER_SIZE + 1];
     size_t read_size;
     size_t frame_length;
 
