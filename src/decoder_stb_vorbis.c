@@ -105,10 +105,7 @@ static bool SetStbVorbisError(const char *function, int error)
 
 typedef struct STBVORBIS_AudioData
 {
-    bool loop;
-    Sint64 loop_start;
-    Sint64 loop_end;
-    Sint64 loop_len;
+    MIX_OggLoop loop;
 } STBVORBIS_AudioData;
 
 typedef struct STBVORBIS_TrackData
@@ -116,6 +113,8 @@ typedef struct STBVORBIS_TrackData
     const STBVORBIS_AudioData *adata;
     stb_vorbis *vorbis;
     Uint32 skip_samples;
+    Sint64 current_iteration;
+    Sint64 current_iteration_frames;
 } STBVORBIS_TrackData;
 
 
@@ -167,13 +166,20 @@ static bool SDLCALL STBVORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, 
     spec->freq = vi.sample_rate;
 
     const stb_vorbis_comment vc = stb_vorbis_get_comment(vorbis);
-    MIX_ParseOggComments(props, spec->freq, vc.vendor, (const char * const *) vc.comment_list, vc.comment_list_length, &adata->loop_start, &adata->loop_end, &adata->loop_len);
+    MIX_ParseOggComments(props, spec->freq, vc.vendor, (const char * const *) vc.comment_list, vc.comment_list_length, &adata->loop);
 
     const Sint64 full_length = (Sint64) stb_vorbis_stream_length_in_samples(vorbis);
-    adata->loop = ((adata->loop_end > 0) && (adata->loop_end <= full_length) && (adata->loop_start < adata->loop_end));
+    if (adata->loop.end > full_length) {
+        adata->loop.active = false;
+    }
     stb_vorbis_close(vorbis);  // done with this instance. Tracks will maintain their own stb_vorbis object.
 
-    *duration_frames = adata->loop ? MIX_DURATION_INFINITE : full_length;  // if looping, stream is infinite.
+    if (adata->loop.active) {
+        *duration_frames = (adata->loop.count < 0) ? MIX_DURATION_INFINITE : (full_length * adata->loop.count);
+    } else {
+        *duration_frames = full_length;
+    }
+
     *audio_userdata = adata;
 
     return true;
@@ -187,6 +193,7 @@ bool SDLCALL STBVORBIS_init_track(void *audio_userdata, SDL_IOStream *io, const 
     }
 
     int error = 0;
+    tdata->current_iteration = -1;
     tdata->vorbis = stb_vorbis_open_io(io, 0, &error, NULL);
     if (!tdata->vorbis) {
         SDL_free(tdata);
@@ -200,11 +207,12 @@ bool SDLCALL STBVORBIS_init_track(void *audio_userdata, SDL_IOStream *io, const 
     return true;
 }
 
+// !!! FIXME: why aren't these marked static?
+bool SDLCALL STBVORBIS_seek(void *track_userdata, Uint64 frame);
+
 bool SDLCALL STBVORBIS_decode(void *track_userdata, SDL_AudioStream *stream)
 {
     STBVORBIS_TrackData *tdata = (STBVORBIS_TrackData *) track_userdata;
-
-    // !!! FIXME: handle looping.
 
     // Note that stb_vorbis does not currently handle the bitstream id
     // changing--a "chained" ogg file, or perhaps a "frankenstein" file, as
@@ -238,7 +246,52 @@ bool SDLCALL STBVORBIS_decode(void *track_userdata, SDL_AudioStream *stream)
         amount = (int) (((Uint32) amount) - skip);
     }
 
-    SDL_PutAudioStreamPlanarData(stream, (const void * const *) pcm_channels, num_channels, amount);
+    const MIX_OggLoop *loop = &tdata->adata->loop;
+    if (tdata->current_iteration < 0) {
+        if (loop->active && ((tdata->current_iteration_frames + amount) >= loop->start)) {
+            tdata->current_iteration = 0;  // we've hit the start of the loop point.
+            tdata->current_iteration_frames = (tdata->current_iteration_frames - loop->start);  // so adding `amount` corrects this later.
+        }
+    }
+
+    if (tdata->current_iteration >= 0) {
+        SDL_assert(loop->active);
+        SDL_assert(tdata->current_iteration_frames <= loop->len);
+        const Sint64 available = loop->len - tdata->current_iteration_frames;
+        if (amount > available) {
+            amount = available;
+        }
+
+        SDL_assert(tdata->current_iteration_frames <= loop->len);
+        if ((tdata->current_iteration_frames + amount) >= loop->len) {  // time to loop?
+            bool should_loop = false;
+            if (loop->count < 0) {  // negative==infinite loop
+                tdata->current_iteration = 0;
+                should_loop = true;
+            } else {
+                tdata->current_iteration++;
+                SDL_assert(tdata->current_iteration <= loop->count);
+                if (tdata->current_iteration < loop->count) {
+                    should_loop = true;
+                }
+            }
+
+            if (should_loop) {
+                const Uint64 nextframe = ((Uint64) loop->start) + ( ((Uint64) loop->len) * ((Uint64) tdata->current_iteration) );
+                if (!STBVORBIS_seek(tdata, nextframe)) {
+                    return false;
+                }
+            } else {
+                tdata->current_iteration = -1;
+            }
+            tdata->current_iteration_frames = 0;
+        }
+    }
+
+    if (amount > 0) {
+        SDL_PutAudioStreamPlanarData(stream, (const void * const *) pcm_channels, num_channels, amount);
+        tdata->current_iteration_frames += amount;
+    }
 
     return true;  // had more data to decode.
 }
@@ -246,12 +299,34 @@ bool SDLCALL STBVORBIS_decode(void *track_userdata, SDL_AudioStream *stream)
 bool SDLCALL STBVORBIS_seek(void *track_userdata, Uint64 frame)
 {
     STBVORBIS_TrackData *tdata = (STBVORBIS_TrackData *) track_userdata;
+    const MIX_OggLoop *loop = &tdata->adata->loop;
+    Sint64 final_iteration = -1;
+    Sint64 final_iteration_frames = 0;
+
+    // frame has hit the loop point?
+    if (loop->active && (frame >= loop->start)) {
+        // figure out the _actual_ frame in the vorbis file we're aiming for.
+        if ((loop->count < 0) || (frame < (loop->len * loop->count))) {  // literally in the loop right now.
+            frame -= loop->start;  // make logical frame index relative to start of loop.
+            final_iteration = (loop->count < 0) ? 0 : (frame / loop->len);  // decide what iteration of the loop we're on (stays at zero for infinite loops).
+            frame %= loop->len;  // drop iterations so we're an offset into the loop.
+            final_iteration_frames = frame;
+            frame += loop->start;  // convert back into physical frame index.
+        } else {  // past the loop point?
+            SDL_assert(loop->count > 0);  // can't be infinite loop if we passed it.
+            frame -= loop->len * loop->count;  // drop the iterations to get the physical frame index.
+        }
+    }
+
     const int rc = stb_vorbis_seek_frame(tdata->vorbis, (unsigned int) frame);
     if (!rc) {
         return SetStbVorbisError("stb_vorbis_seek", stb_vorbis_get_error(tdata->vorbis));
     }
 
     tdata->skip_samples = (Uint32) (frame - ((Uint64) tdata->vorbis->current_loc));
+    tdata->current_iteration = final_iteration;
+    tdata->current_iteration_frames = final_iteration_frames;
+
     return true;
 }
 

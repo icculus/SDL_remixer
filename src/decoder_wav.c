@@ -1457,6 +1457,8 @@ static bool SDLCALL WAV_decode(void *track_userdata, SDL_AudioStream *stream)
     }
 
     buflen = SDL_min(buflen, available_bytes);
+    SDL_assert(buflen > 0);  // we should have caught this in the seekblock code.
+
     const int br = tdata->adata->fetch(tdata, buffer, buflen);  // this will deal with different formats that might need decompression or conversion.
     //SDL_Log("Requested %d bytes, read %d bytes (%d frames)!", buflen, br, br / decoded_framesize);
     if (br <= 0) {

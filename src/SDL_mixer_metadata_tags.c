@@ -1242,11 +1242,14 @@ static Sint64 ParseOggTime(char *time, long samplerate_hz)
     return (result * 60 + val) * samplerate_hz;
 }
 
-void MIX_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, const char * const *user_comments, int num_comments, Sint64 *loop_start, Sint64 *loop_end, Sint64 *loop_len)
+void MIX_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, const char * const *user_comments, int num_comments, MIX_OggLoop *loop)
 {
     if (vendor && *vendor) {
         SDL_SetStringProperty(props, "SDL_mixer.metadata.ogg.vendor", vendor);
     }
+
+    loop->start = loop->len = loop->end = -1;
+    loop->count = -1;  // loops are infinite if a loop was specified but iteration count was not.
 
     bool is_loop_length = false;
     for (int i = 0; i < num_comments; i++) {
@@ -1279,13 +1282,18 @@ void MIX_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, 
         }
 
         if (SDL_strcasecmp(argument, "LOOPSTART") == 0) {
-            *loop_start = ParseOggTime(value, freq);
+            loop->start = ParseOggTime(value, freq);
         } else if (SDL_strcasecmp(argument, "LOOPLENGTH") == 0) {
-            *loop_len = SDL_strtoll(value, NULL, 10);
+            loop->len = SDL_strtoll(value, NULL, 10);
             is_loop_length = true;
         } else if (SDL_strcasecmp(argument, "LOOPEND") == 0) {
-            *loop_end = ParseOggTime(value, freq);
+            loop->end = ParseOggTime(value, freq);
             is_loop_length = false;
+        } else if (SDL_strcasecmp(argument, "LOOPCOUNT") == 0) {
+            loop->count = SDL_strtoll(value, NULL, 10);
+            if (loop->count <= 0) {
+                loop->count = -1;  // normalize infinite loop value.
+            }
         } else if (SDL_strcasecmp(argument, "TITLE") == 0) {
             SDL_SetStringProperty(props, MIX_PROP_METADATA_TITLE_STRING, value);
         } else if (SDL_strcasecmp(argument, "ARTIST") == 0) {
@@ -1316,14 +1324,21 @@ void MIX_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, 
     }
 
     if (is_loop_length) {
-        *loop_end = *loop_start + *loop_len;
+        loop->end = loop->start + loop->len;
     } else {
-        *loop_len = *loop_end - *loop_start;
+        loop->len = loop->end - loop->start;
     }
 
-    /* Ignore invalid loop tag */
-    if ((*loop_start < 0) || (*loop_len < 0) || (*loop_end < 0)) {
-        *loop_start = *loop_len = *loop_end = 0;
+    if (!loop->end || (loop->end < loop->start)) {
+        loop->len = -1;  // invalidate the whole thing.
+    }
+
+    // Ignore invalid or missing loop tag
+    loop->active = ((loop->start >= 0) && (loop->len >= 0) && (loop->end >= 0));
+    if (!loop->active) {
+        loop->start = loop->len = loop->end = 0;
+        loop->count = -1;
+        false;
     }
 }
 

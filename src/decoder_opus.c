@@ -54,10 +54,7 @@
 
 typedef struct OPUS_AudioData
 {
-    bool loop;
-    Sint64 loop_start;
-    Sint64 loop_end;
-    Sint64 loop_len;
+    MIX_OggLoop loop;
 } OPUS_AudioData;
 
 typedef struct OPUS_TrackData
@@ -66,6 +63,8 @@ typedef struct OPUS_TrackData
     OggOpusFile *of;
     int current_channels;
     int current_bitstream;
+    Sint64 current_iteration;
+    Sint64 current_iteration_frames;
 } OPUS_TrackData;
 
 
@@ -167,15 +166,24 @@ static bool SDLCALL OPUS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
 
     const OpusTags *tags = opus.op_tags(of, -1);
     if (tags != NULL) {
-        MIX_ParseOggComments(props, spec->freq, tags->vendor, (const char * const *) tags->user_comments, tags->comments, &adata->loop_start, &adata->loop_end, &adata->loop_len);
+        MIX_ParseOggComments(props, spec->freq, tags->vendor, (const char * const *) tags->user_comments, tags->comments, &adata->loop);
     }
 
     opus.op_raw_seek(of, 0);  // !!! FIXME: it's not clear if this seek is necessary, but https://stackoverflow.com/a/72482773 suggests it might be, at least on older libvorbisfile releases...
     const Sint64 full_length = (Sint64) opus.op_pcm_total(of, -1);
-    adata->loop = ((adata->loop_end > 0) && (adata->loop_end <= full_length) && (adata->loop_start < adata->loop_end));
+
+    if (adata->loop.end > full_length) {
+        adata->loop.active = false;
+    }
+
     opus.op_free(of);  // done with this instance. Tracks will maintain their own OggOpusFile object.
 
-    *duration_frames = adata->loop ? MIX_DURATION_INFINITE : full_length;  // if looping, stream is infinite.
+    if (adata->loop.active) {
+        *duration_frames = (adata->loop.count < 0) ? MIX_DURATION_INFINITE : (full_length * adata->loop.count);
+    } else {
+        *duration_frames = full_length;
+    }
+
     *audio_userdata = adata;
 
     return true;
@@ -200,6 +208,7 @@ bool SDLCALL OPUS_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_A
 
     tdata->current_channels = spec->channels;
     tdata->current_bitstream = -1;
+    tdata->current_iteration = -1;
     tdata->adata = adata;
 
     *track_userdata = tdata;
@@ -207,18 +216,20 @@ bool SDLCALL OPUS_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_A
     return true;
 }
 
+bool SDLCALL OPUS_seek(void *track_userdata, Uint64 frame);
+
 bool SDLCALL OPUS_decode(void *track_userdata, SDL_AudioStream *stream)
 {
     OPUS_TrackData *tdata = (OPUS_TrackData *) track_userdata;
     int bitstream = tdata->current_bitstream;
     float samples[256];
 
-    // !!! FIXME: handle looping.
-
     const int channels = tdata->current_channels;
-    const int amount = (int)opus.op_read_float(tdata->of, samples, SDL_arraysize(samples), &bitstream);
+    int amount = (int)opus.op_read_float(tdata->of, samples, SDL_arraysize(samples), &bitstream);
     if (amount < 0) {
         return set_op_error("op_read_float", amount);
+    } else if (amount == 0) {
+        return false;  // EOF
     }
 
     SDL_assert((amount * channels) <= SDL_arraysize(samples));
@@ -235,17 +246,88 @@ bool SDLCALL OPUS_decode(void *track_userdata, SDL_AudioStream *stream)
         tdata->current_bitstream = bitstream;
     }
 
-    SDL_PutAudioStreamData(stream, samples, amount * tdata->current_channels * sizeof (float));
+    const MIX_OggLoop *loop = &tdata->adata->loop;
+    if (tdata->current_iteration < 0) {
+        if (loop->active && ((tdata->current_iteration_frames + amount) >= loop->start)) {
+            tdata->current_iteration = 0;  // we've hit the start of the loop point.
+            tdata->current_iteration_frames = (tdata->current_iteration_frames - loop->start);  // so adding `amount` corrects this later.
+        }
+    }
 
-    return (amount > 0);
+    if (tdata->current_iteration >= 0) {
+        SDL_assert(loop->active);
+        SDL_assert(tdata->current_iteration_frames <= loop->len);
+        const Sint64 available = loop->len - tdata->current_iteration_frames;
+        if (amount > available) {
+            amount = available;
+        }
+
+        SDL_assert(tdata->current_iteration_frames <= loop->len);
+        if ((tdata->current_iteration_frames + amount) >= loop->len) {  // time to loop?
+            bool should_loop = false;
+            if (loop->count < 0) {  // negative==infinite loop
+                tdata->current_iteration = 0;
+                should_loop = true;
+            } else {
+                tdata->current_iteration++;
+                SDL_assert(tdata->current_iteration <= loop->count);
+                if (tdata->current_iteration < loop->count) {
+                    should_loop = true;
+                }
+            }
+
+            if (should_loop) {
+                const Uint64 nextframe = ((Uint64) loop->start) + ( ((Uint64) loop->len) * ((Uint64) tdata->current_iteration) );
+                if (!OPUS_seek(tdata, nextframe)) {
+                    return false;
+                }
+            } else {
+                tdata->current_iteration = -1;
+            }
+            tdata->current_iteration_frames = 0;
+        }
+    }
+
+    if (amount > 0) {
+        SDL_PutAudioStreamData(stream, samples, amount * tdata->current_channels * sizeof (float));
+        tdata->current_iteration_frames += amount;
+    }
+
+    return true;  // had more data to decode.
 }
 
 bool SDLCALL OPUS_seek(void *track_userdata, Uint64 frame)
 {
     OPUS_TrackData *tdata = (OPUS_TrackData *) track_userdata;
+    const MIX_OggLoop *loop = &tdata->adata->loop;
+    Sint64 final_iteration = -1;
+    Sint64 final_iteration_frames = 0;
+
+    // frame has hit the loop point?
+    if (loop->active && (frame >= loop->start)) {
+        // figure out the _actual_ frame in the vorbis file we're aiming for.
+        if ((loop->count < 0) || (frame < (loop->len * loop->count))) {  // literally in the loop right now.
+            frame -= loop->start;  // make logical frame index relative to start of loop.
+            final_iteration = (loop->count < 0) ? 0 : (frame / loop->len);  // decide what iteration of the loop we're on (stays at zero for infinite loops).
+            frame %= loop->len;  // drop iterations so we're an offset into the loop.
+            final_iteration_frames = frame;
+            frame += loop->start;  // convert back into physical frame index.
+        } else {  // past the loop point?
+            SDL_assert(loop->count > 0);  // can't be infinite loop if we passed it.
+            frame -= loop->len * loop->count;  // drop the iterations to get the physical frame index.
+        }
+    }
+
     // !!! FIXME: I assume op_raw_seek is faster if we're seeking to start, but I could be wrong.
     const int rc = (frame == 0) ? opus.op_raw_seek(tdata->of, 0) : opus.op_pcm_seek(tdata->of, (Sint64) frame);
-    return (rc == 0) ? true : set_op_error("op_pcm_seek", rc);
+    if (rc != 0) {
+        return set_op_error("op_pcm_seek", rc);
+    }
+
+    tdata->current_iteration = final_iteration;
+    tdata->current_iteration_frames = final_iteration_frames;
+
+    return true;
 }
 
 void SDLCALL OPUS_quit_track(void *track_userdata)

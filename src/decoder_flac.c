@@ -50,10 +50,7 @@
 typedef struct FLAC_AudioData
 {
     bool is_ogg_stream;
-    bool loop;
-    Sint64 loop_start;
-    Sint64 loop_end;
-    Sint64 loop_len;
+    MIX_OggLoop loop;
     SDL_PropertiesID props;
 } FLAC_AudioData;
 
@@ -67,6 +64,8 @@ typedef struct FLAC_TrackData
     int bits_per_sample;
     Uint8 *cvtbuf;
     size_t cvtbuflen;
+    Sint64 current_iteration;
+    Sint64 current_iteration_frames;
 } FLAC_TrackData;
 
 
@@ -127,6 +126,8 @@ static FLAC__StreamDecoderWriteStatus FLAC_IoWriteNoOp(const FLAC__StreamDecoder
     return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;  // we don't need this data at this moment.
 }
 
+bool SDLCALL FLAC_seek(void *track_userdata, Uint64 frame);
+
 static FLAC__StreamDecoderWriteStatus FLAC_IoWrite(const FLAC__StreamDecoder *decoder, const FLAC__Frame *frame, const FLAC__int32 *const buffer[], void *userdata)
 {
     FLAC_TrackData *tdata = (FLAC_TrackData *) userdata;
@@ -152,8 +153,8 @@ static FLAC__StreamDecoderWriteStatus FLAC_IoWrite(const FLAC__StreamDecoder *de
         SDL_SetAudioStreamFormat(stream, &tdata->spec, NULL);
     }
 
-    const size_t samples = (size_t) frame->header.blocksize;
-    const size_t onebuflen = ((size_t) SDL_AUDIO_BYTESIZE(tdata->spec.format)) * samples;
+    size_t amount = (size_t) frame->header.blocksize;
+    const size_t onebuflen = ((size_t) SDL_AUDIO_BYTESIZE(tdata->spec.format)) * amount;
     const size_t buflen = onebuflen * channels;
     if (tdata->cvtbuflen < buflen) {
         void *ptr = SDL_realloc(tdata->cvtbuf, buflen);
@@ -164,37 +165,82 @@ static FLAC__StreamDecoderWriteStatus FLAC_IoWrite(const FLAC__StreamDecoder *de
         tdata->cvtbuflen = buflen;
     }
 
-    void *channel_arrays[32];
-    SDL_assert(SDL_arraysize(channel_arrays) >= channels);
-
-    // (If we padded out to 5.1 to get a front-center channel, the unnecessary channels happen
-    //   to be at the end, so it'll assume those padded channels are silent.)
-    for (int i = 0; i < channels; i++) {
-        channel_arrays[i] = tdata->cvtbuf + (i * onebuflen);
+    const MIX_OggLoop *loop = &tdata->adata->loop;
+    if (tdata->current_iteration < 0) {
+        if (loop->active && ((tdata->current_iteration_frames + amount) >= loop->start)) {
+            tdata->current_iteration = 0;  // we've hit the start of the loop point.
+            tdata->current_iteration_frames = (tdata->current_iteration_frames - loop->start);  // so adding `amount` corrects this later.
+        }
     }
 
-    const int shift = SDL_AUDIO_BITSIZE(tdata->spec.format) - tdata->bits_per_sample;
+    if (tdata->current_iteration >= 0) {
+        SDL_assert(loop->active);
+        SDL_assert(tdata->current_iteration_frames <= loop->len);
+        const Sint64 available = loop->len - tdata->current_iteration_frames;
+        if (amount > available) {
+            amount = available;
+        }
 
-    #define PREP_CHANNEL_ARRAY(typ) { \
-        for (int channel = 0; channel < channels; channel++) { \
-            const Sint32 *src = (const Sint32 *) buffer[channel]; \
-            typ *dst = (typ *) channel_arrays[channel]; \
-            for (int i = 0; i < samples; i++) { \
-                dst[i] = (typ) (src[i] << shift); \
+        SDL_assert(tdata->current_iteration_frames <= loop->len);
+        if ((tdata->current_iteration_frames + amount) >= loop->len) {  // time to loop?
+            bool should_loop = false;
+            if (loop->count < 0) {  // negative==infinite loop
+                tdata->current_iteration = 0;
+                should_loop = true;
+            } else {
+                tdata->current_iteration++;
+                SDL_assert(tdata->current_iteration <= loop->count);
+                if (tdata->current_iteration < loop->count) {
+                    should_loop = true;
+                }
+            }
+
+            if (should_loop) {
+                const Uint64 nextframe = ((Uint64) loop->start) + ( ((Uint64) loop->len) * ((Uint64) tdata->current_iteration) );
+                if (!FLAC_seek(tdata, nextframe)) {
+                    return false;
+                }
+            } else {
+                tdata->current_iteration = -1;
+            }
+            tdata->current_iteration_frames = 0;
+        }
+    }
+
+    if (amount > 0) {
+        void *channel_arrays[32];
+        SDL_assert(SDL_arraysize(channel_arrays) >= channels);
+
+        // (If we padded out to 5.1 to get a front-center channel, the unnecessary channels happen
+        //   to be at the end, so it'll assume those padded channels are silent.)
+        for (int i = 0; i < channels; i++) {
+            channel_arrays[i] = tdata->cvtbuf + (i * onebuflen);
+        }
+
+        const int shift = SDL_AUDIO_BITSIZE(tdata->spec.format) - tdata->bits_per_sample;
+
+        #define PREP_CHANNEL_ARRAY(typ) { \
+            for (int channel = 0; channel < channels; channel++) { \
+                const Sint32 *src = (const Sint32 *) buffer[channel]; \
+                typ *dst = (typ *) channel_arrays[channel]; \
+                for (int i = 0; i < amount; i++) { \
+                    dst[i] = (typ) (src[i] << shift); \
+                } \
             } \
-        } \
+        }
+
+        switch (tdata->spec.format) {
+            case SDL_AUDIO_S8: PREP_CHANNEL_ARRAY(Sint8); break;
+            case SDL_AUDIO_S16: PREP_CHANNEL_ARRAY(Sint16); break;
+            case SDL_AUDIO_S32: PREP_CHANNEL_ARRAY(Sint32); break;
+            default: SDL_assert(!"Unexpected audio data type"); return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
+        }
+
+        #undef PREP_CHANNEL_ARRAY
+
+        SDL_PutAudioStreamPlanarData(stream, (const void * const *) channel_arrays, channels, amount);
+        tdata->current_iteration_frames += amount;
     }
-
-    switch (tdata->spec.format) {
-        case SDL_AUDIO_S8: PREP_CHANNEL_ARRAY(Sint8); break;
-        case SDL_AUDIO_S16: PREP_CHANNEL_ARRAY(Sint16); break;
-        case SDL_AUDIO_S32: PREP_CHANNEL_ARRAY(Sint32); break;
-        default: SDL_assert(!"Unexpected audio data type"); return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
-    }
-
-    #undef PREP_CHANNEL_ARRAY
-
-    SDL_PutAudioStreamPlanarData(stream, (const void * const *) channel_arrays, channels, samples);
 
     return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
 }
@@ -225,7 +271,7 @@ static void FLAC_IoMetadata(const FLAC__StreamDecoder *decoder, const FLAC__Stre
             for (int i = 0; i < num_comments; i++) {
             	comments[i] = (char *) vc->comments[i].entry;
             }
-            MIX_ParseOggComments(adata->props, tdata->spec.freq, (const char *) vc->vendor_string.entry, (const char * const *) comments, num_comments, &adata->loop_start, &adata->loop_end, &adata->loop_len);
+            MIX_ParseOggComments(adata->props, tdata->spec.freq, (const char *) vc->vendor_string.entry, (const char * const *) comments, num_comments, &adata->loop);
             SDL_free(comments);
         }
     }
@@ -319,7 +365,17 @@ static bool SDLCALL FLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
     adata->props = 0;  // metadata callbacks needed this, but don't store this past this function.
 
     SDL_copyp(spec, &tdata.spec);
-    *duration_frames = total_frames;
+
+    if (adata->loop.end > total_frames) {
+        adata->loop.active = false;
+    }
+
+    if (adata->loop.active) {
+        *duration_frames = (adata->loop.count < 0) ? MIX_DURATION_INFINITE : (total_frames * adata->loop.count);
+    } else {
+        *duration_frames = total_frames;
+    }
+
     *audio_userdata = adata;
 
     return true;
@@ -336,6 +392,8 @@ bool SDLCALL FLAC_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_A
     tdata->adata = adata;
     tdata->io = io;
     tdata->decoder = flac.FLAC__stream_decoder_new();
+    tdata->current_iteration = -1;
+
     if (!tdata->decoder) {
         SDL_free(tdata);
         return SDL_SetError("FLAC__stream_decoder_new() failed");
@@ -343,9 +401,9 @@ bool SDLCALL FLAC_init_track(void *audio_userdata, SDL_IOStream *io, const SDL_A
 
     FLAC__StreamDecoderInitStatus ret;
     if (adata->is_ogg_stream) {
-        ret = flac.FLAC__stream_decoder_init_ogg_stream(tdata->decoder, FLAC_IoRead, FLAC_IoSeek, FLAC_IoTell, FLAC_IoLength, FLAC_IoEOF, FLAC_IoWrite, FLAC_IoMetadataNoOp, FLAC_IoError, d);
+        ret = flac.FLAC__stream_decoder_init_ogg_stream(tdata->decoder, FLAC_IoRead, FLAC_IoSeek, FLAC_IoTell, FLAC_IoLength, FLAC_IoEOF, FLAC_IoWrite, FLAC_IoMetadataNoOp, FLAC_IoError, tdata);
     } else {
-        ret = flac.FLAC__stream_decoder_init_stream(tdata->decoder, FLAC_IoRead, FLAC_IoSeek, FLAC_IoTell, FLAC_IoLength, FLAC_IoEOF, FLAC_IoWrite, FLAC_IoMetadataNoOp, FLAC_IoError, d);
+        ret = flac.FLAC__stream_decoder_init_stream(tdata->decoder, FLAC_IoRead, FLAC_IoSeek, FLAC_IoTell, FLAC_IoLength, FLAC_IoEOF, FLAC_IoWrite, FLAC_IoMetadataNoOp, FLAC_IoError, tdata);
     }
 
     if (ret != FLAC__STREAM_DECODER_INIT_STATUS_OK) {
@@ -384,12 +442,35 @@ bool SDLCALL FLAC_decode(void *track_userdata, SDL_AudioStream *stream)
 bool SDLCALL FLAC_seek(void *track_userdata, Uint64 frame)
 {
     FLAC_TrackData *tdata = (FLAC_TrackData *) track_userdata;
+    const MIX_OggLoop *loop = &tdata->adata->loop;
+    Sint64 final_iteration = -1;
+    Sint64 final_iteration_frames = 0;
+
+    // frame has hit the loop point?
+    if (loop->active && (frame >= loop->start)) {
+        // figure out the _actual_ frame in the vorbis file we're aiming for.
+        if ((loop->count < 0) || (frame < (loop->len * loop->count))) {  // literally in the loop right now.
+            frame -= loop->start;  // make logical frame index relative to start of loop.
+            final_iteration = (loop->count < 0) ? 0 : (frame / loop->len);  // decide what iteration of the loop we're on (stays at zero for infinite loops).
+            frame %= loop->len;  // drop iterations so we're an offset into the loop.
+            final_iteration_frames = frame;
+            frame += loop->start;  // convert back into physical frame index.
+        } else {  // past the loop point?
+            SDL_assert(loop->count > 0);  // can't be infinite loop if we passed it.
+            frame -= loop->len * loop->count;  // drop the iterations to get the physical frame index.
+        }
+    }
+
     if (!flac.FLAC__stream_decoder_seek_absolute(tdata->decoder, frame)) {
         if (flac.FLAC__stream_decoder_get_state(tdata->decoder) == FLAC__STREAM_DECODER_SEEK_ERROR) {
             flac.FLAC__stream_decoder_flush(tdata->decoder);
         }
         return SDL_SetError("Seeking of FLAC stream failed: libFLAC seek failed.");
     }
+
+    tdata->current_iteration = final_iteration;
+    tdata->current_iteration_frames = final_iteration_frames;
+
     return true;
 }
 
@@ -406,7 +487,6 @@ void SDLCALL FLAC_quit_track(void *track_userdata)
 void SDLCALL FLAC_quit_audio(void *audio_userdata)
 {
     FLAC_AudioData *adata = (FLAC_AudioData *) audio_userdata;
-    SDL_free((void *) adata->data);
     SDL_free(adata);
 }
 

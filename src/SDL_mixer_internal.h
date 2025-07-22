@@ -249,7 +249,16 @@ struct MIX_AudioDecoder
 extern bool MIX_ReadMetadataTags(SDL_IOStream *io, SDL_PropertiesID props, MIX_IoClamp *clamp);
 
 // Various Ogg-based decoders use this (Vorbis, FLAC, Opus, etc).
-void MIX_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, const char * const *user_comments, int num_comments, Sint64 *loop_start, Sint64 *loop_end, Sint64 *loop_len);
+typedef struct MIX_OggLoop
+{
+    Sint64 start;
+    Sint64 end;
+    Sint64 len;
+    Sint64 count;
+    bool active;
+} MIX_OggLoop;
+
+void MIX_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, const char * const *user_comments, int num_comments, MIX_OggLoop *loop);
 
 // `panning` and `speakers` need to be arrays of 2 elements each, to be filled in with what speakers to write to, and at what gain. `position` must be 16 bytes (only 12 are used), aligned to 16 bytes.
 void MIX_Spatialize(const MIX_VBAP2D *vbap2d, const float *position, float *panning, int *speakers);

@@ -71,10 +71,7 @@
 
 typedef struct VORBIS_AudioData
 {
-    bool loop;
-    Sint64 loop_start;
-    Sint64 loop_end;
-    Sint64 loop_len;
+    MIX_OggLoop loop;
 } VORBIS_AudioData;
 
 typedef struct VORBIS_TrackData
@@ -84,6 +81,8 @@ typedef struct VORBIS_TrackData
     int current_channels;
     int current_freq;
     int current_bitstream;
+    Sint64 current_iteration;
+    Sint64 current_iteration_frames;
 } VORBIS_TrackData;
 
 
@@ -186,15 +185,24 @@ static bool SDLCALL VORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
 
     vorbis_comment *vc = vorbis.ov_comment(&vf, -1);
     if (vc != NULL) {
-        MIX_ParseOggComments(props, spec->freq, vc->vendor, (const char * const *) vc->user_comments, vc->comments, &adata->loop_start, &adata->loop_end, &adata->loop_len);
+        MIX_ParseOggComments(props, spec->freq, vc->vendor, (const char * const *) vc->user_comments, vc->comments, &adata->loop);
     }
 
     vorbis.ov_raw_seek(&vf, 0);  // !!! FIXME: it's not clear if this seek is necessary, but https://stackoverflow.com/a/72482773 suggests it might be, at least on older libvorbisfile releases...
     const Sint64 full_length = (Sint64) vorbis.ov_pcm_total(&vf, -1);
-    adata->loop = ((adata->loop_end > 0) && (adata->loop_end <= full_length) && (adata->loop_start < adata->loop_end));
+
+    if (adata->loop.end > full_length) {
+        adata->loop.active = false;
+    }
+
     vorbis.ov_clear(&vf);  // done with this instance. Tracks will maintain their own OggVorbis_File object.
 
-    *duration_frames = adata->loop ? MIX_DURATION_INFINITE : full_length;  // if looping, stream is infinite.
+    if (adata->loop.active) {
+        *duration_frames = (adata->loop.count < 0) ? MIX_DURATION_INFINITE : (full_length * adata->loop.count);
+    } else {
+        *duration_frames = full_length;
+    }
+
     *audio_userdata = adata;
 
     return true;
@@ -219,6 +227,7 @@ bool SDLCALL VORBIS_init_track(void *audio_userdata, SDL_IOStream *io, const SDL
     tdata->current_channels = spec->channels;
     tdata->current_freq = spec->freq;
     tdata->current_bitstream = -1;
+    tdata->current_iteration = -1;
     tdata->adata = adata;
 
     *track_userdata = tdata;
@@ -226,13 +235,12 @@ bool SDLCALL VORBIS_init_track(void *audio_userdata, SDL_IOStream *io, const SDL
     return true;
 }
 
+bool SDLCALL VORBIS_seek(void *track_userdata, Uint64 frame);
+
 bool SDLCALL VORBIS_decode(void *track_userdata, SDL_AudioStream *stream)
 {
     VORBIS_TrackData *tdata = (VORBIS_TrackData *) track_userdata;
-    //const VORBIS_AudioData *adata = tdata->adata;
     int bitstream = tdata->current_bitstream;
-
-    // !!! FIXME: handle looping.
 
 #ifdef VORBIS_USE_TREMOR
     Uint8 samples[256];
@@ -240,9 +248,10 @@ bool SDLCALL VORBIS_decode(void *track_userdata, SDL_AudioStream *stream)
     if (amount < 0) {
         return SetOggVorbisError("ov_read", amount);
     }
+    fixme amount is bytes, needs to be sample frames.
 #else
     float **pcm_channels = NULL;
-    const int amount = (int)vorbis.ov_read_float(&tdata->vf, &pcm_channels, 256, &bitstream);
+    int amount = (int)vorbis.ov_read_float(&tdata->vf, &pcm_channels, 256, &bitstream);
     if (amount < 0) {
         return SetOggVorbisError("ov_read_float", amount);
     }
@@ -265,11 +274,57 @@ bool SDLCALL VORBIS_decode(void *track_userdata, SDL_AudioStream *stream)
         return false;  // EOF
     }
 
-#ifdef VORBIS_USE_TREMOR
-    SDL_PutAudioStreamData(stream, samples, amount);  // ov_read gave us bytes, not sample frames.
-#else
-    SDL_PutAudioStreamPlanarData(stream, (const void * const *) pcm_channels, -1, amount);
-#endif
+    const MIX_OggLoop *loop = &tdata->adata->loop;
+    if (tdata->current_iteration < 0) {
+        if (loop->active && ((tdata->current_iteration_frames + amount) >= loop->start)) {
+            tdata->current_iteration = 0;  // we've hit the start of the loop point.
+            tdata->current_iteration_frames = (tdata->current_iteration_frames - loop->start);  // so adding `amount` corrects this later.
+        }
+    }
+
+    if (tdata->current_iteration >= 0) {
+        SDL_assert(loop->active);
+        SDL_assert(tdata->current_iteration_frames <= loop->len);
+        const Sint64 available = loop->len - tdata->current_iteration_frames;
+        if (amount > available) {
+            amount = available;
+        }
+
+        SDL_assert(tdata->current_iteration_frames <= loop->len);
+        if ((tdata->current_iteration_frames + amount) >= loop->len) {  // time to loop?
+            bool should_loop = false;
+            if (loop->count < 0) {  // negative==infinite loop
+                tdata->current_iteration = 0;
+                should_loop = true;
+            } else {
+                tdata->current_iteration++;
+                SDL_assert(tdata->current_iteration <= loop->count);
+                if (tdata->current_iteration < loop->count) {
+                    should_loop = true;
+                }
+            }
+
+            if (should_loop) {
+                const Uint64 nextframe = ((Uint64) loop->start) + ( ((Uint64) loop->len) * ((Uint64) tdata->current_iteration) );
+                if (!VORBIS_seek(tdata, nextframe)) {
+                    return false;
+                }
+            } else {
+                tdata->current_iteration = -1;
+            }
+            tdata->current_iteration_frames = 0;
+        }
+    }
+
+    if (amount > 0) {
+        #ifdef VORBIS_USE_TREMOR
+    fixme amount wrong
+        SDL_PutAudioStreamData(stream, samples, amount);  // ov_read gave us bytes, not sample frames.
+        #else
+        SDL_PutAudioStreamPlanarData(stream, (const void * const *) pcm_channels, -1, amount);
+        #endif
+        tdata->current_iteration_frames += amount;
+    }
 
     return true;  // had more data to decode.
 }
@@ -277,9 +332,35 @@ bool SDLCALL VORBIS_decode(void *track_userdata, SDL_AudioStream *stream)
 bool SDLCALL VORBIS_seek(void *track_userdata, Uint64 frame)
 {
     VORBIS_TrackData *tdata = (VORBIS_TrackData *) track_userdata;
+    const MIX_OggLoop *loop = &tdata->adata->loop;
+    Sint64 final_iteration = -1;
+    Sint64 final_iteration_frames = 0;
+
+    // frame has hit the loop point?
+    if (loop->active && (frame >= loop->start)) {
+        // figure out the _actual_ frame in the vorbis file we're aiming for.
+        if ((loop->count < 0) || (frame < (loop->len * loop->count))) {  // literally in the loop right now.
+            frame -= loop->start;  // make logical frame index relative to start of loop.
+            final_iteration = (loop->count < 0) ? 0 : (frame / loop->len);  // decide what iteration of the loop we're on (stays at zero for infinite loops).
+            frame %= loop->len;  // drop iterations so we're an offset into the loop.
+            final_iteration_frames = frame;
+            frame += loop->start;  // convert back into physical frame index.
+        } else {  // past the loop point?
+            SDL_assert(loop->count > 0);  // can't be infinite loop if we passed it.
+            frame -= loop->len * loop->count;  // drop the iterations to get the physical frame index.
+        }
+    }
+
     // !!! FIXME: I assume ov_raw_seek is faster if we're seeking to start, but I could be wrong.
     const int rc = (frame == 0) ? vorbis.ov_raw_seek(&tdata->vf, 0) : vorbis.ov_pcm_seek(&tdata->vf, (ogg_int64_t) frame);
-    return (rc == 0) ? true : SetOggVorbisError("ov_pcm_seek", rc);
+    if (rc != 0) {
+        return SetOggVorbisError("ov_pcm_seek", rc);
+    }
+
+    tdata->current_iteration = final_iteration;
+    tdata->current_iteration_frames = final_iteration_frames;
+
+    return true;
 }
 
 void SDLCALL VORBIS_quit_track(void *track_userdata)
