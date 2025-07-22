@@ -96,8 +96,8 @@ typedef struct {
 typedef struct {
     Uint32 identifier;
     Uint32 type;
-    Uint32 start;
-    Uint32 end;
+    Uint32 start;  // this is SAMPLE FRAMES, not byte offset!
+    Uint32 end;    // this is SAMPLE FRAMES, not byte offset!
     Uint32 fraction;
     Uint32 play_count;
 } SampleLoop;
@@ -166,13 +166,21 @@ typedef struct MS_ADPCM_ChannelState
     Sint16 coeff2;
 } MS_ADPCM_ChannelState;
 
-typedef struct {
-    bool active;
+typedef struct WAVLoopPoint
+{
     Uint32 start;
     Uint32 stop;
-    Uint32 initial_play_count;
-    Uint32 current_play_count;
+    Uint32 iterations;
 } WAVLoopPoint;
+
+// precalc some positional things to make seeking and looping easier.
+typedef struct WAVSeekBlock
+{
+    Sint64 frame_start;
+    Sint64 num_frames;
+    Sint64 iterations;
+    Sint64 seek_position;     // for compressed formats, this is the start of the block. For uncompressed, it's the start of the sample frame.
+} WAVSeekBlock;
 
 typedef struct WAV_TrackData WAV_TrackData;
 
@@ -187,9 +195,10 @@ typedef struct WAV_AudioData
     int framesize;
     int decoded_framesize;
     WAV_FetchFn fetch;
-    Sint64 num_pcm_frames;
     unsigned int numloops;
     WAVLoopPoint *loops;
+    unsigned int num_seekblocks;
+    WAVSeekBlock *seekblocks;
 } WAV_AudioData;
 
 struct WAV_TrackData
@@ -197,8 +206,15 @@ struct WAV_TrackData
     const WAV_AudioData *adata;
     SDL_IOStream *io;
     ADPCM_DecoderState adpcm_state;
+    const WAVSeekBlock *seekblock;  // current seekblock we're decoding.
+    Uint32 current_iteration;        // current loop iteration in seekblock
+    Uint32 current_iteration_frames;  // current framecount into seekblock.
 };
 
+static bool IsADPCM(const Uint16 encoding)
+{
+    return ((encoding == MS_ADPCM_CODE) || (encoding == IMA_ADPCM_CODE));
+}
 
 static bool MS_ADPCM_Init(ADPCM_DecoderInfo *info, const Uint8 *chunk_data, Uint32 chunk_length)
 {
@@ -939,14 +955,19 @@ static bool AddLoopPoint(WAV_AudioData *adata, Uint32 play_count, Uint32 start, 
         return false;
     }
 
-    loop = &loops[adata->numloops];
-    loop->start = start;
-    loop->stop = stop;
-    loop->initial_play_count = play_count;
-    loop->current_play_count = play_count;
+    //SDL_Log("LOOP: count=%d start=%d stop=%d", (int) play_count, (int) start, (int) stop);
 
-    adata->loops = loops;
-    ++adata->numloops;
+    // ignore the loop if it's bogus but carry on.
+    if (start < stop) {
+        loop = &loops[adata->numloops];
+        loop->start = start;
+        loop->stop = stop;
+        loop->iterations = play_count;
+
+        adata->loops = loops;
+        ++adata->numloops;
+    }
+
     return true;
 }
 
@@ -970,7 +991,7 @@ static bool ParseSMPL(WAV_AudioData *adata, SDL_IOStream *io, Uint32 chunk_lengt
 
     for (i = 0; i < SDL_Swap32LE(chunk->sample_loops); ++i) {
         const Uint32 LOOP_TYPE_FORWARD = 0;
-        Uint32 loop_type = SDL_Swap32LE(chunk->loops[i].type);
+        const Uint32 loop_type = SDL_Swap32LE(chunk->loops[i].type);
         if (loop_type == LOOP_TYPE_FORWARD) {
             AddLoopPoint(adata, SDL_Swap32LE(chunk->loops[i].play_count), SDL_Swap32LE(chunk->loops[i].start), SDL_Swap32LE(chunk->loops[i].end));
         }
@@ -978,6 +999,11 @@ static bool ParseSMPL(WAV_AudioData *adata, SDL_IOStream *io, Uint32 chunk_lengt
 
     loaded = true;
     SDL_free(data);
+
+    // !!! FIXME: sort loops so they go from start to finish.
+    // !!! FIXME: eliminate loops that overlap.
+    // !!! FIXME: eliminate loops that go past EOF.
+
     return loaded;
 }
 
@@ -1060,6 +1086,118 @@ static bool ParseWAVID3(SDL_IOStream *io, SDL_PropertiesID props, Uint32 chunk_l
     clamp.length = (Sint64) chunk_length;
     MIX_ReadMetadataTags(ioclamp, props, &clamp);
     SDL_CloseIO(ioclamp);
+    return true;
+}
+
+static void CalcSeekBlockSeek(const WAV_AudioData *adata, Uint32 actual_frame, WAVSeekBlock *seekblock)
+{
+    if (IsADPCM(adata->encoding)) {
+        seekblock->seek_position = (Sint64) (adata->start + ((actual_frame / adata->adpcm_info.samplesperblock) * adata->adpcm_info.blocksize));
+    } else {
+        seekblock->seek_position = (Sint64) (adata->start + (actual_frame * adata->framesize));
+    }
+}
+
+static bool BuildSeekBlocks(WAV_AudioData *adata)
+{
+    const Sint64 all_bytes_in_file = adata->stop - adata->start;
+
+    const unsigned int numloops = adata->numloops;
+    if (numloops == 0) {
+        WAVSeekBlock *seekblocks = (WAVSeekBlock *) SDL_calloc(1, sizeof (*seekblocks));
+        if (!seekblocks) {
+            return false;
+        }
+        adata->seekblocks = seekblocks;
+        adata->num_seekblocks = 1;
+
+        seekblocks->frame_start = 0;
+        seekblocks->iterations = 1;
+        seekblocks->seek_position = adata->start;
+
+        if (IsADPCM(adata->encoding)) {
+            // if for some reason the final block isn't completely present, this number might be wrong; we'll presumably decode to the real EOF later.
+            seekblocks->num_frames = (all_bytes_in_file / adata->adpcm_info.blocksize) * adata->adpcm_info.samplesperblock;
+        } else {
+            seekblocks->num_frames = all_bytes_in_file / adata->framesize;
+        }
+    } else {
+        const unsigned int num_seekblocks = (numloops * 2) + 1;
+        WAVSeekBlock *seekblocks = (WAVSeekBlock *) SDL_calloc(num_seekblocks, sizeof (*seekblocks));
+        if (!seekblocks) {
+            return false;
+        }
+        adata->seekblocks = seekblocks;
+        adata->num_seekblocks = num_seekblocks;
+
+        Sint64 current_frame = 0;
+
+        // first seekblock is start of audio data, before any loop.
+        seekblocks->frame_start = current_frame;
+        seekblocks->num_frames = adata->loops[0].start;
+        seekblocks->iterations = 1;
+        CalcSeekBlockSeek(adata, 0, seekblocks);
+
+        current_frame += seekblocks->num_frames;
+        seekblocks++;
+
+        for (int i = 0; i < numloops; i++) {
+            // space covered by a loop...
+            const WAVLoopPoint *loop = &adata->loops[i];
+            seekblocks->frame_start = current_frame;
+            seekblocks->num_frames = loop->stop - loop->start;
+            CalcSeekBlockSeek(adata, loop->start, seekblocks);
+
+            if (loop->iterations == 0) {  // it's an infinite loop!
+                seekblocks->iterations = -1;
+                current_frame += seekblocks->num_frames;
+            } else {
+                seekblocks->iterations = loop->iterations;
+                current_frame += seekblocks->num_frames * loop->iterations;
+            }
+
+            // space covered between loops (or after last loop to EOF)...
+            seekblocks++;
+            seekblocks->frame_start = current_frame;
+            if (i < (numloops - 1)) {
+                seekblocks->num_frames = adata->loops[i + 1].start - loop->stop;
+            } else {
+                if (IsADPCM(adata->encoding)) {
+                    // this is kinda wordy, but I wanted to reason through all the math.
+                    const Sint64 loop_stop_frame = (Sint64) loop->stop;
+                    const Sint64 frames_per_block = (Sint64) adata->adpcm_info.samplesperblock;
+                    const Sint64 stop_frame_block = loop_stop_frame / frames_per_block;
+                    const Sint64 offset_into_stop_block = loop_stop_frame % frames_per_block;
+                    const Sint64 frames_left_in_stop_block = frames_per_block - offset_into_stop_block;
+                    const Sint64 all_blocks_in_file = ((Sint64) (adata->stop - adata->start)) / frames_per_block;
+                    const Sint64 blocks_left_after_stop_block = all_blocks_in_file - stop_frame_block;
+                    seekblocks->num_frames = frames_left_in_stop_block + (blocks_left_after_stop_block * frames_per_block);
+                } else {
+                    const Sint64 all_frames_in_file = all_bytes_in_file / adata->framesize;
+                    seekblocks->num_frames = all_frames_in_file - ((Sint64) loop->stop);
+                }
+            }
+
+            seekblocks->iterations = 1;
+            CalcSeekBlockSeek(adata, loop->stop, seekblocks);
+
+            current_frame += seekblocks->num_frames;
+            seekblocks++;
+        }
+    }
+
+    #if 0
+    for (unsigned int i = 0; i < adata->num_seekblocks; i++) {
+        const WAVSeekBlock *seekblock = &adata->seekblocks[i];
+        SDL_Log("SEEK BLOCK #%u: frame_start=%d, num_frames=%d, iterations=%d, seek_position=%d",
+                i,
+                (int) seekblock->frame_start,
+                (int) seekblock->num_frames,
+                (int) seekblock->iterations,
+                (int) seekblock->seek_position);
+    }
+    #endif
+
     return true;
 }
 
@@ -1154,6 +1292,10 @@ static bool WAV_init_audio_internal(WAV_AudioData *adata, SDL_IOStream *io, SDL_
         return SDL_SetError("Bad WAV file (no DATA chunk)");
     }
 
+    if (!BuildSeekBlocks(adata)) {
+        return false;
+    }
+
     return true;
 }
 
@@ -1176,14 +1318,25 @@ static bool SDLCALL WAV_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_Pr
         return false;
     }
 
-    adata->num_pcm_frames = MIX_DURATION_UNKNOWN;  // !!! FIXME: WAV_init_audio_internal needs to set this.
     const bool rc = WAV_init_audio_internal(adata, io, spec, props);
     if (!rc) {
         WAV_quit_audio(adata);
         return false;
     }
 
-    *duration_frames = adata->num_pcm_frames;
+    Sint64 num_frames = 0;
+
+    // figure out if loops increase play length...
+    for (unsigned int i = 0; i < adata->num_seekblocks; i++) {
+        const WAVSeekBlock *seekblock = &adata->seekblocks[i];
+        if (seekblock->iterations < 0) {  // infinite loop
+            num_frames = MIX_DURATION_INFINITE;
+            break;
+        }
+        num_frames += seekblock->num_frames * seekblock->iterations;
+    }
+
+    *duration_frames = num_frames;
     *audio_userdata = adata;
 
     return true;
@@ -1199,14 +1352,21 @@ static bool SDLCALL WAV_init_track(void *audio_userdata, SDL_IOStream *io, const
 
     tdata->adata = adata;
     tdata->io = io;
+    tdata->seekblock = &adata->seekblocks[0];
+    tdata->current_iteration = 0;
+    tdata->current_iteration_frames = 0;
+
     ADPCM_DecoderState *state = &tdata->adpcm_state;
     state->info = &adata->adpcm_info;
-    if (adata->encoding == MS_ADPCM_CODE) {
-        state->cstate = SDL_calloc(state->info->channels, sizeof(MS_ADPCM_ChannelState));
-    } else if (adata->encoding == IMA_ADPCM_CODE) {
-        state->cstate = SDL_calloc(state->info->channels, sizeof(Sint8));
-    }
-    if ((adata->encoding == MS_ADPCM_CODE) || (adata->encoding == IMA_ADPCM_CODE)) {
+    if (IsADPCM(adata->encoding)) {
+        if (adata->encoding == MS_ADPCM_CODE) {
+            state->cstate = SDL_calloc(state->info->channels, sizeof(MS_ADPCM_ChannelState));
+        } else if (adata->encoding == IMA_ADPCM_CODE) {
+            state->cstate = SDL_calloc(state->info->channels, sizeof(Sint8));
+        } else {
+            SDL_assert(!"WAV: Unexpected ADPCM encoding");
+        }
+
         if (!state->cstate) {
             SDL_free(tdata);
             return false;
@@ -1235,24 +1395,103 @@ static bool SDLCALL WAV_init_track(void *audio_userdata, SDL_IOStream *io, const
     return true;
 }
 
+static bool SDLCALL WAV_seek(void *track_userdata, Uint64 frame);
+
 static bool SDLCALL WAV_decode(void *track_userdata, SDL_AudioStream *stream)
 {
     WAV_TrackData *tdata = (WAV_TrackData *) track_userdata;
+    const WAVSeekBlock *seekblock = tdata->seekblock;
+
+    // see if we are at the end of a loop, etc.
+    SDL_assert(tdata->current_iteration_frames <= seekblock->num_frames);
+    while (tdata->current_iteration_frames == seekblock->num_frames) {
+        //SDL_Log("Decoded to the end of a seekblock! (iteration %d of %d)", (int) tdata->current_iteration, (int) seekblock->iterations);
+
+        bool should_loop = false;
+        if (seekblock->iterations < 0) {  // negative==infinite loop
+            tdata->current_iteration = 0;
+            should_loop = true;
+        } else {
+            tdata->current_iteration++;
+            SDL_assert(tdata->current_iteration <= seekblock->iterations);
+            if (tdata->current_iteration < seekblock->iterations) {
+                should_loop = true;
+            }
+        }
+
+        if (should_loop) {
+            const Uint64 nextframe = ((Uint64) seekblock->frame_start) + ( ((Uint64) seekblock->num_frames) * ((Uint64) tdata->current_iteration) );
+            const Sint64 current_iteration = tdata->current_iteration;
+            //SDL_Log("Moving back to the start of seekblock for next iteration!");
+            //SDL_Log("Loop seek to frame=%d byte=%d", (int) nextframe, (int) seekblock->seek_position);
+            if (!WAV_seek(tdata, nextframe)) {
+                //SDL_Log("SEEK FAILED");
+                return false;
+            }
+            SDL_assert(tdata->seekblock == seekblock);  // should not have changed.
+            SDL_assert(tdata->current_iteration == current_iteration);  // should not have changed.
+            SDL_assert(tdata->current_iteration_frames == 0);  // should be at start of loop.
+        } else {
+            //SDL_Log("That was the last iteration, moving to next seekblock!");
+            seekblock++;
+            if ((seekblock - tdata->adata->seekblocks) >= tdata->adata->num_seekblocks) {  // ran out of blocks! EOF!!
+                //SDL_Log("That was the last seekblock, too!");
+                tdata->current_iteration--;
+                return false;
+            }
+            tdata->seekblock = seekblock;
+            tdata->current_iteration = 0;
+        }
+        tdata->current_iteration_frames = 0;
+    }
+
+    const int decoded_framesize = tdata->adata->decoded_framesize;
+    const Uint64 available_bytes = (seekblock->num_frames - tdata->current_iteration_frames) * decoded_framesize;
 
     // !!! FIXME: looping.
     Uint8 buffer[1024];
     int buflen = (int) sizeof (buffer);
-    const int mod = buflen % tdata->adata->decoded_framesize;
+    const int mod = buflen % decoded_framesize;
     if (mod) {
         buflen -= mod;
     }
+
+    buflen = SDL_min(buflen, available_bytes);
     const int br = tdata->adata->fetch(tdata, buffer, buflen);  // this will deal with different formats that might need decompression or conversion.
+    //SDL_Log("Requested %d bytes, read %d bytes (%d frames)!", buflen, br, br / decoded_framesize);
     if (br <= 0) {
         return false;
     }
 
+    // update framecount, but we'll actually move to the next seekblock if necessary on the next decode, since we definitely have data to return now.
+    tdata->current_iteration_frames += (br / decoded_framesize);
+    SDL_assert(tdata->current_iteration_frames <= seekblock->num_frames);
+
     SDL_PutAudioStreamData(stream, buffer, br);
     return true;
+}
+
+static bool FindWAVSeekBlock(const WAVSeekBlock *seekblocks, int num_seekblocks, Uint64 ui64frame, const WAVSeekBlock **result)
+{
+    SDL_assert(seekblocks != NULL);
+    SDL_assert(result != NULL);
+
+    const Sint64 frame = (Sint64) ui64frame;
+    for (unsigned int i = 0; i < num_seekblocks; i++) {
+        const WAVSeekBlock *seekblock = &seekblocks[i];
+        const Sint64 frame_start = seekblock->frame_start;
+        const Sint64 num_frames = seekblock->num_frames;
+        if (num_frames < 0) {  // infinite loop?
+            *result = seekblock;
+            return true;  // it's in here.
+        } else if ((frame >= frame_start) && (frame < (frame_start + num_frames))) {   //  is the target!
+            *result = seekblock;
+            return true;  // it's in here.
+        }
+    }
+
+    *result = NULL;
+    return SDL_SetError("Seek past end of file");
 }
 
 static bool SDLCALL WAV_seek(void *track_userdata, Uint64 frame)
@@ -1260,15 +1499,38 @@ static bool SDLCALL WAV_seek(void *track_userdata, Uint64 frame)
     WAV_TrackData *tdata = (WAV_TrackData *) track_userdata;
     const WAV_AudioData *adata = tdata->adata;
 
-    if (adata->encoding == MS_ADPCM_CODE || adata->encoding == IMA_ADPCM_CODE) {
-        const Sint64 dest_offset = ((Sint64)(frame / adata->adpcm_info.samplesperblock)) * adata->adpcm_info.blocksize;
-        const Sint64 destpos = adata->start + dest_offset;
-        if (destpos > adata->stop) {
-            return false;
-        } else if (SDL_SeekIO(tdata->io, destpos, SDL_IO_SEEK_SET) < 0) {
+    // figure out if loops change final position...
+    const WAVSeekBlock *seekblock = NULL;
+    if (!FindWAVSeekBlock(adata->seekblocks, adata->num_seekblocks, frame, &seekblock)) {
+        return false;
+    }
+
+    SDL_assert(seekblock != NULL);
+
+    // make frame relative to the start of this seekblock.
+    frame -= seekblock->frame_start;
+
+    const Uint64 current_iteration = (seekblock->iterations < 0) ? 0 : (frame / seekblock->num_frames);
+    const Uint64 current_iteration_frames = (frame % seekblock->num_frames);
+
+    SDL_assert((seekblock->iterations < 0) || (current_iteration < seekblock->iterations));
+
+    // Deal with loop iterations, offset by the modulus of total frames in the loop; frame_start should have already
+    //  dealt with iterations, so this shouldn't matter how many iterations there are or if it's an infinite loop.
+    frame += current_iteration_frames;
+
+    if (IsADPCM(adata->encoding)) {
+        const Sint64 dest_offset = ((Sint64)(frame / adata->adpcm_info.samplesperblock)) * adata->adpcm_info.blocksize;  // the start of the correct ADPCM block within this seekblock.
+        const Sint64 destpos = seekblock->seek_position + dest_offset;  // seek_position is aligned to the start of an ADPCM block.
+        SDL_assert(destpos >= adata->start);  // FindWAVSeekBlock should have made sure we're in the range.
+        SDL_assert(destpos <= adata->stop);
+        if (SDL_SeekIO(tdata->io, destpos, SDL_IO_SEEK_SET) < 0) {
             return false;
         }
 
+        tdata->adpcm_state.output.pos = tdata->adpcm_state.output.read = 0;  // reset this for the new block.
+
+        // We're at the start of the right ADPCM block now; decode and throw away until we hit the exact frame we want to seek to.
         int remainder = ((int)(frame % adata->adpcm_info.samplesperblock)) * adata->decoded_framesize;
         while (remainder > 0) {
             Uint8 buffer[1024];
@@ -1280,13 +1542,18 @@ static bool SDLCALL WAV_seek(void *track_userdata, Uint64 frame)
         }
     } else {
         const Sint64 dest_offset = (Sint64)frame * adata->framesize;
-        const Sint64 destpos = adata->start + dest_offset;
-        if (destpos > adata->stop) {
-            return false;
-        } else if (SDL_SeekIO(tdata->io, destpos, SDL_IO_SEEK_SET) < 0) {
+        const Sint64 destpos = seekblock->seek_position + dest_offset;  // seek_position is aligned to start of a sample frame.
+        SDL_assert(destpos >= adata->start);  // FindWAVSeekBlock should have made sure we're in the range.
+        SDL_assert(destpos <= adata->stop);
+        if (SDL_SeekIO(tdata->io, destpos, SDL_IO_SEEK_SET) < 0) {
             return false;
         }
     }
+
+    tdata->seekblock = seekblock;
+    tdata->current_iteration = current_iteration;
+    tdata->current_iteration_frames = current_iteration_frames;
+
     return true;
 }
 
@@ -1301,6 +1568,7 @@ static void SDLCALL WAV_quit_audio(void *audio_userdata)
 {
     WAV_AudioData *adata = (WAV_AudioData *) audio_userdata;
     ADPCM_InfoCleanup(&adata->adpcm_info);
+    SDL_free(adata->seekblocks);
     SDL_free(adata->loops);
     SDL_free(adata);
 }
