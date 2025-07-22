@@ -216,7 +216,7 @@ bool SDLCALL STBVORBIS_decode(void *track_userdata, SDL_AudioStream *stream)
 
     float **pcm_channels = NULL;
     int num_channels = 0;
-    const int amount = stb_vorbis_get_frame_float(tdata->vorbis, &num_channels, &pcm_channels);
+    int amount = stb_vorbis_get_frame_float(tdata->vorbis, &num_channels, &pcm_channels);
     if (amount <= 0) {
         return false;  // EOF
     }
@@ -235,6 +235,7 @@ bool SDLCALL STBVORBIS_decode(void *track_userdata, SDL_AudioStream *stream)
         }
         pcm_channels = outputs;
         tdata->skip_samples = 0;
+        amount = (int) (((Uint32) amount) - skip);
     }
 
     SDL_PutAudioStreamPlanarData(stream, (const void * const *) pcm_channels, num_channels, amount);
