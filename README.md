@@ -1,11 +1,18 @@
 # SDL_remixer
 
-This is a temporary repository where I'm working on an SDL_mixer rewrite.
+## Archived!
 
-This will eventually be deleted or archived, and if everything works out, its
-code will move into SDL_mixer's main branch.
+This work is now at [SDL_mixer's GitHub](https://github.com/libsdl-org/SDL_mixer).
 
-You probably do not want this code, you want [SDL_mixer](https://github.com/libsdl-org/SDL_mixer) instead.
+SDL_remixer was a temporary repository where I was working on an SDL_mixer
+rewrite.
+
+That work is now complete, and this code has become SDL3_mixer!
+
+This repo is archived, to retain revision history, issues, etc, and future
+development has moved to SDL_mixer's main branch.
+
+So go visit [SDL_mixer](https://github.com/libsdl-org/SDL_mixer) instead!
 
 --ryan.
 
