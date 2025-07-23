@@ -358,7 +358,8 @@ static bool SDLCALL FLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL_P
     flac.FLAC__stream_decoder_delete(tdata.decoder);
 
     if (!rc) {
-        SDL_SetError("FLAC__stream_decoder_process_until_end_of_metadata() failed");
+        SDL_free(adata);
+        return SDL_SetError("FLAC__stream_decoder_process_until_end_of_metadata() failed");
     }
 
     // metadata processing should have filled in several things in `adata`.
