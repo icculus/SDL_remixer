@@ -49,11 +49,11 @@ static const MIX_Decoder *decoders[] = {
     #ifdef DECODER_FLAC_DRFLAC
     &MIX_Decoder_DRFLAC,
     #endif
-    #ifdef DECODER_MIDI_TIMIDITY
-    &MIX_Decoder_TIMIDITY,
-    #endif
     #ifdef DECODER_MIDI_FLUIDSYNTH
     &MIX_Decoder_FLUIDSYNTH,
+    #endif
+    #ifdef DECODER_MIDI_TIMIDITY
+    &MIX_Decoder_TIMIDITY,
     #endif
     #ifdef DECODER_WAVPACK
     &MIX_Decoder_WAVPACK,
