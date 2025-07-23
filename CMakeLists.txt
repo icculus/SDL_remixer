@@ -123,75 +123,47 @@ endif()
 option(SDLMIXER_SAMPLES "Build the SDL3_mixer sample program(s)" ${SDLMIXER_SAMPLES_DEFAULT})
 cmake_dependent_option(SDLMIXER_SAMPLES_INSTALL "Install the SDL3_mixer sample program(s)" OFF "SDLMIXER_SAMPLES;SDLMIXER_INSTALL" OFF)
 
-option(SDLMIXER_FLAC "Enable FLAC audio" ON)
-
-cmake_dependent_option(SDLMIXER_FLAC_LIBFLAC "Enable FLAC audio using libFLAC" OFF SDLMIXER_FLAC OFF)
-cmake_dependent_option(SDLMIXER_FLAC_LIBFLAC_SHARED "Dynamically load LIBFLAC" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_FLAC_LIBFLAC OFF)
-
-cmake_dependent_option(SDLMIXER_FLAC_DRFLAC "Enable FLAC audio using drflac" ON SDLMIXER_FLAC OFF)
-
-option(SDLMIXER_GME "Support loading GME audio via game-music-emu" ON)
-option(SDLMIXER_GME_SHARED "Dynamically load libgme" "${SDLMIXER_DEPS_SHARED}")
-
-option(SDLMIXER_MOD "Enable MOD audio" ON)
-
-cmake_dependent_option(SDLMIXER_MOD_XMP "Support loading MOD audio via libxmp" ON SDLMIXER_MOD OFF)
-cmake_dependent_option(SDLMIXER_MOD_XMP_LITE "Use libxmp-lite instead of libxmp" OFF "SDLMIXER_MOD_XMP;NOT SDLMIXER_VENDORED" OFF)
-cmake_dependent_option(SDLMIXER_MOD_XMP_SHARED "Dynamically load libxmp(-lite)" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_MOD_XMP OFF)
-
-if(SDLMIXER_MOD AND NOT SDLMIXER_MOD_XMP)
-    message(FATAL_ERROR "MOD support was enabled (SDLMIXER_MOD) but xmp (SDLMIXER_MOD_XMP) was disabled.")
-endif()
-
-option(SDLMIXER_MP3 "Enable MP3 audio" ON)
-
-cmake_dependent_option(SDLMIXER_MP3_DRMP3 "Support loading MP3 audio via dr_mp3" ON SDLMIXER_MP3 OFF)
-cmake_dependent_option(SDLMIXER_MP3_MPG123 "Support loading MP3 audio via MPG123" OFF SDLMIXER_MP3 OFF)
-cmake_dependent_option(SDLMIXER_MP3_MPG123_SHARED "Dynamically load mpg123" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_MP3_MPG123 OFF)
-if(SDLMIXER_MP3 AND NOT (SDLMIXER_MP3_DRMP3 OR SDLMIXER_MP3_MPG123))
-    message(FATAL_ERROR "MP3 support was enabled (SDLMIXER_MP3) but neither drmp3 (SDLMIXER_MP3_DRMP3) nor mpg123 (SDLMIXER_MP3_MPG123) were enabled.")
-endif()
-
-option(SDLMIXER_MIDI "Enable MIDI audio" ON)
-cmake_dependent_option(SDLMIXER_MIDI_FLUIDSYNTH "Support FluidSynth MIDI output" ON "SDLMIXER_MIDI;NOT SDLMIXER_VENDORED" OFF)
-cmake_dependent_option(SDLMIXER_MIDI_FLUIDSYNTH_SHARED "Dynamically load libfluidsynth" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_MIDI_FLUIDSYNTH OFF)
-cmake_dependent_option(SDLMIXER_MIDI_TIMIDITY "Support timidity MIDI output" ON SDLMIXER_MIDI OFF)
-if(SDLMIXER_MIDI AND NOT (SDLMIXER_MIDI_TIMIDITY OR SDLMIXER_MIDI_FLUIDSYNTH))
-    message(FATAL_ERROR "MIDI support was enabled (SDLMIXER_MIDI) but neither FluidSynth (SDLMIXER_MIDI_FLUIDSYNTH) nor timidity (SDLMIXER_MIDI_TIMIDITY) was enabled")
-endif()
-
-option(SDLMIXER_OPUS "Enable Opus audio" ON)
-cmake_dependent_option(SDLMIXER_OPUS_SHARED "Dynamically load libopus" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_OPUS OFF)
-
-# !!! FIXME: allow both stb and libvorbisfile support to be enabled; they can both live in the same build.
-set(sdl3mixer_vorbis_strings STB TREMOR VORBISFILE)
-set(SDLMIXER_VORBIS "STB" CACHE STRING "Enable OGG Vorbis audio")
-set_property(CACHE SDLMIXER_VORBIS PROPERTY STRINGS "${sdl3mixer_vorbis_strings}")
-if(SDLMIXER_VORBIS)
-    if(NOT SDLMIXER_VORBIS IN_LIST sdl3mixer_vorbis_strings)
-        message(FATAL_ERROR "SDLMIXER_VORBIS contains an invalid value (=${SDLMIXER_VORBIS}). It must be one of ${sdl3mixer_vorbis_strings}.")
-    endif()
-endif()
-set(SDLMIXER_VORBIS_STB OFF)
-set(SDLMIXER_VORBIS_TREMOR OFF)
-set(SDLMIXER_VORBIS_VORBISFILE OFF)
-if(SDLMIXER_VORBIS STREQUAL "STB")
-    set(SDLMIXER_VORBIS_STB ON)
-endif()
-if(SDLMIXER_VORBIS STREQUAL "TREMOR")
-    set(SDLMIXER_VORBIS_TREMOR ON)
-endif()
-if(SDLMIXER_VORBIS STREQUAL "VORBISFILE")
-    set(SDLMIXER_VORBIS_VORBISFILE ON)
-endif()
-cmake_dependent_option(SDLMIXER_VORBIS_TREMOR_SHARED "Dynamically load tremor library" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_VORBIS_TREMOR OFF)
-cmake_dependent_option(SDLMIXER_VORBIS_VORBISFILE_SHARED "Dynamically load vorbisfile library" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_VORBIS_VORBISFILE OFF)
-
 # These are implemented in SDL_mixer itself, not using a third-party library.
 option(SDLMIXER_AIFF "Enable AIFF audio" ON)
 option(SDLMIXER_WAVE "Enable WAVE audio" ON)
 option(SDLMIXER_VOC "Enable VOC audio" ON)
 option(SDLMIXER_AU "Enable AU audio" ON)
+
+# Decoders that use third-party dependencies, even if they are compiled in, vendored, etc.
+option(SDLMIXER_FLAC_LIBFLAC "Enable FLAC audio using libFLAC" ON)
+cmake_dependent_option(SDLMIXER_FLAC_LIBFLAC_SHARED "Dynamically load LIBFLAC" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_FLAC_LIBFLAC OFF)
+
+option(SDLMIXER_FLAC_DRFLAC "Enable FLAC audio using drflac" ON)
+
+option(SDLMIXER_GME "Support loading GME audio via game-music-emu" ON)
+option(SDLMIXER_GME_SHARED "Dynamically load libgme" "${SDLMIXER_DEPS_SHARED}")
+
+option(SDLMIXER_MOD_XMP "Support loading MOD audio via libxmp" ON)
+cmake_dependent_option(SDLMIXER_MOD_XMP_LITE "Use libxmp-lite instead of libxmp" OFF "SDLMIXER_MOD_XMP;NOT SDLMIXER_VENDORED" OFF)
+cmake_dependent_option(SDLMIXER_MOD_XMP_SHARED "Dynamically load libxmp(-lite)" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_MOD_XMP OFF)
+
+option(SDLMIXER_MP3_DRMP3 "Support loading MP3 audio via dr_mp3" ON)
+option(SDLMIXER_MP3_MPG123 "Support loading MP3 audio via libmpg123" ON)
+cmake_dependent_option(SDLMIXER_MP3_MPG123_SHARED "Dynamically load mpg123" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_MP3_MPG123 OFF)
+
+cmake_dependent_option(SDLMIXER_MIDI_FLUIDSYNTH "Support FluidSynth MIDI output" ON "NOT SDLMIXER_VENDORED" OFF)
+cmake_dependent_option(SDLMIXER_MIDI_FLUIDSYNTH_SHARED "Dynamically load libfluidsynth" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_MIDI_FLUIDSYNTH OFF)
+
+option(SDLMIXER_MIDI_TIMIDITY "Support timidity MIDI output" ON)
+
+option(SDLMIXER_OPUS "Enable Opus audio via libopus" ON)
+cmake_dependent_option(SDLMIXER_OPUS_SHARED "Dynamically load libopus" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_OPUS OFF)
+
+option(SDLMIXER_VORBIS_STB "Enable Ogg Vorbis audio via stb_vorbis" ON)
+option(SDLMIXER_VORBIS_VORBISFILE "Enable Ogg Vorbis audio via libvorbisfile" ON)
+option(SDLMIXER_VORBIS_TREMOR "Enable Ogg Vorbis audio via libtremor" OFF)
+
+if (SDLMIXER_VORBIS_VORBISFILE AND SDLMIXER_VORBIS_TREMOR)
+    message(FATAL_ERROR "Both SDLMIXER_VORBIS_VORBISFILE and SDLMIXER_VORBIS_TREMOR are both enabled, but only one can be used")
+endif()
+
+cmake_dependent_option(SDLMIXER_VORBIS_VORBISFILE_SHARED "Dynamically load vorbisfile library" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_VORBIS_VORBISFILE OFF)
+cmake_dependent_option(SDLMIXER_VORBIS_TREMOR_SHARED "Dynamically load tremor library" "${SDLMIXER_DEPS_SHARED}" SDLMIXER_VORBIS_TREMOR OFF)
 
 option(SDLMIXER_WAVPACK "Enable WavPack audio" ON)
 cmake_dependent_option(SDLMIXER_WAVPACK_DSD "Enable WavPack DSD audio support" OFF SDLMIXER_WAVPACK OFF)
