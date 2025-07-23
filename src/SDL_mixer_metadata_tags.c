@@ -756,6 +756,7 @@ static bool verify_lyrics3v2(const Uint8 *data, size_t length)
 #define MUSICMATCH_OFFSETS_SIZE         20
 
 #define MMTAG_PARANOID
+
 static bool is_musicmatch(const Uint8 *data, Sint64 length)
 {
   /* From docs/musicmatch.txt in id3lib: https://sourceforge.net/projects/id3lib/
@@ -1338,7 +1339,6 @@ void MIX_ParseOggComments(SDL_PropertiesID props, int freq, const char *vendor, 
     if (!loop->active) {
         loop->start = loop->len = loop->end = 0;
         loop->count = -1;
-        false;
     }
 }
 
