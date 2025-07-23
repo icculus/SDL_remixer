@@ -71,6 +71,7 @@
 
 typedef struct VORBIS_AudioData
 {
+    size_t framesize;
     MIX_OggLoop loop;
 } VORBIS_AudioData;
 
@@ -183,6 +184,8 @@ static bool SDLCALL VORBIS_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
     spec->channels = vi->channels;
     spec->freq = vi->rate;
 
+    adata->framesize = SDL_AUDIO_FRAMESIZE(*spec);
+
     vorbis_comment *vc = vorbis.ov_comment(&vf, -1);
     if (vc != NULL) {
         MIX_ParseOggComments(props, spec->freq, vc->vendor, (const char * const *) vc->user_comments, vc->comments, &adata->loop);
@@ -243,12 +246,13 @@ bool SDLCALL VORBIS_decode(void *track_userdata, SDL_AudioStream *stream)
     int bitstream = tdata->current_bitstream;
 
 #ifdef VORBIS_USE_TREMOR
+    const size_t framesize = adata->framesize;
     Uint8 samples[256];
     const int amount = (int)vorbis.ov_read(&tdata->vf, samples, sizeof (samples), &bitstream);
     if (amount < 0) {
         return SetOggVorbisError("ov_read", amount);
     }
-    fixme amount is bytes, needs to be sample frames.
+    amount *= framesize;
 #else
     float **pcm_channels = NULL;
     int amount = (int)vorbis.ov_read_float(&tdata->vf, &pcm_channels, 256, &bitstream);
@@ -318,8 +322,7 @@ bool SDLCALL VORBIS_decode(void *track_userdata, SDL_AudioStream *stream)
 
     if (amount > 0) {
         #ifdef VORBIS_USE_TREMOR
-    fixme amount wrong
-        SDL_PutAudioStreamData(stream, samples, amount);  // ov_read gave us bytes, not sample frames.
+        SDL_PutAudioStreamData(stream, samples, amount / framesize);
         #else
         SDL_PutAudioStreamPlanarData(stream, (const void * const *) pcm_channels, -1, amount);
         #endif
