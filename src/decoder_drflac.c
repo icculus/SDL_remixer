@@ -69,6 +69,12 @@ static drflac_bool32 DRFLAC_IoSeek(void *context, int offset, drflac_seek_origin
     return (SDL_SeekIO((SDL_IOStream *) context, offset, (SDL_IOWhence) origin) < 0) ? DRFLAC_FALSE : DRFLAC_TRUE;
 }
 
+static drflac_bool32 DRFLAC_IoTell(void *context, drflac_int64 *pos)
+{
+    *pos = (drflac_int64) SDL_TellIO((SDL_IOStream *) context);
+    return (*pos < 0) ? DRFLAC_FALSE : DRFLAC_TRUE;
+}
+
 
 typedef struct DRFLAC_Metadata {
     char *vendor;
@@ -147,7 +153,7 @@ static bool SDLCALL DRFLAC_init_audio(SDL_IOStream *io, SDL_AudioSpec *spec, SDL
     DRFLAC_Metadata metadata;
     SDL_zero(metadata);
     SDL_SetPointerProperty(SDL_GetIOProperties(io), MIX_PROP_DRFLAC_METADATA_POINTER, &metadata);  // need to hang this pointer somewhere, just during init_audio.
-    drflac *decoder = drflac_open_with_metadata(DRFLAC_IoRead, DRFLAC_IoSeek, DRFLAC_OnMetadata, io, NULL);
+    drflac *decoder = drflac_open_with_metadata(DRFLAC_IoRead, DRFLAC_IoSeek, DRFLAC_IoTell, DRFLAC_OnMetadata, io, NULL);
     if (!decoder) {
         return false;  // probably not a FLAC file.
     }
@@ -197,7 +203,7 @@ static bool SDLCALL DRFLAC_init_track(void *audio_userdata, SDL_IOStream *io, co
         return false;
     }
 
-    tdata->decoder = drflac_open(DRFLAC_IoRead, DRFLAC_IoSeek, io, NULL);
+    tdata->decoder = drflac_open(DRFLAC_IoRead, DRFLAC_IoSeek, DRFLAC_IoTell, io, NULL);
     if (!tdata->decoder) {
         SDL_free(tdata);
         return false;
